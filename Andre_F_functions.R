@@ -10493,3 +10493,30 @@ make_gmt_file <- function(genelist, outfile){
     print("Finished")
   } else{print("The provided genelist is not a *named* list object"); stop()}
 }
+
+get_gene_modules <- function(gene_info_file,gene,sep='\t',gene_column="Gene"){
+  require(pathosr)
+  require(tempusr)
+  require(dplyr)
+  ##HGNC symbol is what we're using to filter.. if you want something else, it hasn't been implemented yet
+  
+  if(is.character(gene_info_file)){
+    print("Importing gene info file")
+    gene_info <- read.table(gene_info_file,header=T, sep=sep,row.names = 1)} else{
+      gene_info <- gene_info_file}
+    gene_info_sub <- gene_info %>% dplyr::select(Module=module_label,Gene=hgnc_symbol,Color=module_color)
+   
+    if(!all(gene %in% gene_info_sub$Gene)){
+      print(paste0("There is/are ",length(setdiff(gene,gene_info_sub$Gene))," gene in input missing from the gene info file: They have been removed"))
+      gene <- intersect(gene,gene_info_sub$Gene)
+    } else {
+      gene <- gene }
+   if(length(gene)<1){
+     stop() 
+     } else{
+    module_of_interest <- unlist(lapply(gene, function(x) dplyr::filter(gene_info_sub,Gene==x)$Module))
+    names(module_of_interest) <- gene
+    
+    return(module_of_interest)
+  }
+}
