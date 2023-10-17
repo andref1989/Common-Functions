@@ -10451,14 +10451,72 @@ call_mutations_from_bam <- function(bam, outfile, reference=NULL,regions=NULL,re
         if(is.character(regions)){
             file_check <- file.info(regions)
             if(is.na(file_check$size)){
-                coord_check <- grep("[0-9]:[0-9]{1,9}-[0-9]{1,9}|chr[a-zA-Z0-9_]{1,100}:[0-9]{1,9}-[0-9]{1,9}*",regions,value=T)
+                coord_check <- grepl("[0-9]:[0-9]{1,9}-[0-9]{1,9}|chr[a-zA-Z0-9_]{1,100}:[0-9]{1,9}-[0-9]{1,9}",regions)
                 if(coord_check){ region_flag= "-r"} else{ print("Not a valid location. Region format is \"chr:start-end");stop()}} else{ region_flag="-R"}}
         if(!report_all_bases){
-        cmd <- paste("bcftools mpileup",bam,,region_flag,regions,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else { cmd <- paste("bcftools mpileup",bam,,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")
+        cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else { cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")
 
                                                                                                                             }
-        print(cmd)
+        system(cmd)
     } else if(!report_all_bases){
-        cmd <- paste("bcftools mpileup",bam,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else {cmd <- paste("bcftools mpileup",bam,,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")}
-    print(cmd)}
+        cmd <- paste("bcftools mpileup",bam,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else {cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")}
+    system(cmd)
+    
+    if(!grepl(".gz", outfile)){ intfile <- paste0(outfile,".gz")
+    system(paste("mv",intfile, outfile))
+      system(paste0("gunzip ",outfile))
+      } else{ outfile <- outfile}
+    
+    print(outfile)  
+}
 
+concatenate_vcfs <- function(input, output_vcf){
+  require(VariantAnnotation)
+  if(is.directory(input)){ 
+    file_list <- list.files(input,".vcf",full.names=TRUE)
+  } else if( is.vector(input)){
+    if(all(file.exists(input))){
+      for(i in input){ in_vcf <- tryCatch({readVcfAsVRanges(paste0(i))}, error=function(e) { print("No variants")})
+      in_vcf$Sample <- unique(sampleNames(in_vcf))
+      
+      
+        }  
+    
+    }
+
+}}
+
+make_gmt_file <- function(genelist, outfile){
+  if(class(genelist)=="list" && !is.null(names(genelist))){
+    gmt <- unlist(lapply(names(genelist), function(x) paste0(x,"\t",paste0(genelist[[x]],collapse="\t"))))
+    writeLines(gmt,outfile)
+    print("Finished")
+  } else{print("The provided genelist is not a *named* list object"); stop()}
+}
+
+get_gene_modules <- function(gene_info_file,gene,sep='\t',gene_column="Gene"){
+  require(pathosr)
+  require(tempusr)
+  require(dplyr)
+  ##HGNC symbol is what we're using to filter.. if you want something else, it hasn't been implemented yet
+  
+  if(is.character(gene_info_file)){
+    print("Importing gene info file")
+    gene_info <- read.table(gene_info_file,header=T, sep=sep,row.names = 1)} else{
+      gene_info <- gene_info_file}
+    gene_info_sub <- gene_info %>% dplyr::select(Module=module_label,Gene=hgnc_symbol,Color=module_color)
+   
+    if(!all(gene %in% gene_info_sub$Gene)){
+      print(paste0("There is/are ",length(setdiff(gene,gene_info_sub$Gene))," gene in input missing from the gene info file: They have been removed"))
+      gene <- intersect(gene,gene_info_sub$Gene)
+    } else {
+      gene <- gene }
+   if(length(gene)<1){
+     stop() 
+     } else{
+    module_of_interest <- unlist(lapply(gene, function(x) dplyr::filter(gene_info_sub,Gene==x)$Module))
+    names(module_of_interest) <- gene
+    
+    return(module_of_interest)
+  }
+}
