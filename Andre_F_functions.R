@@ -10470,21 +10470,31 @@ call_mutations_from_bam <- function(bam, outfile, reference=NULL,regions=NULL,re
     print(outfile)  
 }
 
-concatenate_vcfs <- function(input, output_vcf){
+
+concatenate_vcfs <- function(input,sample_ID=NULL){
+  out_vcf <- list()
   require(VariantAnnotation)
   if(is.directory(input)){ 
     file_list <- list.files(input,".vcf",full.names=TRUE)
-  } else if( is.vector(input)){
+    
+    for(i in file_list){ in_vcf <- tryCatch({readVcfAsVRanges(paste0(i))}, error=function(e) { print("No variants")})
+    if(!is.null(sample_ID) && sample_ID!="filename"){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename"){ sampleNames(in_vcf) <- i}
+    in_vcf$Sample <- unique(sampleNames(in_vcf))
+    out_vcf[[in_vcf$Sample[1]]] <- in_vcf
+    }}
+  else if( is.vector(input)){
     if(all(file.exists(input))){
       for(i in input){ in_vcf <- tryCatch({readVcfAsVRanges(paste0(i))}, error=function(e) { print("No variants")})
+      if(!is.null(sample_ID)){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename"){ sampleNames(in_vcf) <- i}
       in_vcf$Sample <- unique(sampleNames(in_vcf))
+      out_vcf[[in_vcf$Sample[1]]] <- in_vcf  }  
       
-      
-        }  
-    
-    }
+    }}
+  
+  out <- do.call("c", out_vcf)
+  return(out)
+}
 
-}}
 
 make_gmt_file <- function(genelist, outfile){
   if(class(genelist)=="list" && !is.null(names(genelist))){
