@@ -10474,24 +10474,29 @@ call_mutations_from_bam <- function(bam, outfile, reference=NULL,regions=NULL,re
 concatenate_vcfs <- function(input,sample_ID=NULL){
   out_vcf <- list()
   require(VariantAnnotation)
-  if(is.directory(input)){ 
+  if(is.directory(input)){
     file_list <- list.files(input,".vcf",full.names=TRUE)
-    
-    for(i in file_list){ in_vcf <- tryCatch({readVcfAsVRanges(paste0(i))}, error=function(e) { print("No variants")})
-    if(!is.null(sample_ID) && sample_ID!="filename"){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename"){ sampleNames(in_vcf) <- i}
+    str(file_list)
+    for(i in file_list){ in_vcf <- tryCatch({readVcfAsVRanges(i)}, error=function(e) { print("No variants")})
+        if(!is.null(sample_ID) && sample_ID!="filename" && class(in_vcf) == "VRanges"){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename" && class(in_vcf)=="VRanges"){ sampleNames(in_vcf) <- i}
+        if(class(in_vcf)=="VRanges"){
     in_vcf$Sample <- unique(sampleNames(in_vcf))
     out_vcf[[in_vcf$Sample[1]]] <- in_vcf
-    }}
+        } else{ print("No variants")}
+        if(verbose){ print(i)}}
+  }
   else if( is.vector(input)){
     if(all(file.exists(input))){
-      for(i in input){ in_vcf <- tryCatch({readVcfAsVRanges(paste0(i))}, error=function(e) { print("No variants")})
-      if(!is.null(sample_ID)){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename"){ sampleNames(in_vcf) <- i}
+      for(i in input){ in_vcf <- tryCatch({readVcfAsVRanges(i)}, error=function(e) { print("No variants")})
+      if(!is.null(sample_ID) && sample_ID!="filename" && class(in_vcf) =="VRanges"){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename" && class(in_vcf)=="VRanges"){ sampleNames(in_vcf) <- i}
+
+      if(class(in_vcf)=="VRanges"){
       in_vcf$Sample <- unique(sampleNames(in_vcf))
-      out_vcf[[in_vcf$Sample[1]]] <- in_vcf  }  
+      out_vcf[[in_vcf$Sample[1]]] <- in_vcf  } else{ print("No variants")}  
       
-    }}
+    if(verbose){print(i)}}}}
   
-  out <- collapse_granges_list( out_vcf)
+  out <- collapse_granges_list(out_vcf)
   return(out)
 }
 
