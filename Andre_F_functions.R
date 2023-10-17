@@ -10491,10 +10491,9 @@ concatenate_vcfs <- function(input,sample_ID=NULL){
       
     }}
   
-  out <- do.call("c", out_vcf)
+  out <- collapse_granges_list( out_vcf)
   return(out)
 }
-
 
 make_gmt_file <- function(genelist, outfile){
   if(class(genelist)=="list" && !is.null(names(genelist))){
