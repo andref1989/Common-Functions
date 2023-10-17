@@ -10471,17 +10471,17 @@ call_mutations_from_bam <- function(bam, outfile, reference=NULL,regions=NULL,re
 }
 
 
-concatenate_vcfs <- function(input,sample_ID=NULL){
+concatenate_vcfs <- function(input,sample_ID=NULL,verbose=F){
   out_vcf <- list()
   require(VariantAnnotation)
   if(is.directory(input)){
     file_list <- list.files(input,".vcf",full.names=TRUE)
-    str(file_list)
+
     for(i in file_list){ in_vcf <- tryCatch({readVcfAsVRanges(i)}, error=function(e) { print("No variants")})
         if(!is.null(sample_ID) && sample_ID!="filename" && class(in_vcf) == "VRanges"){ sampleNames(in_vcf) <- sample_ID} else if(sample_ID=="filename" && class(in_vcf)=="VRanges"){ sampleNames(in_vcf) <- i}
         if(class(in_vcf)=="VRanges"){
     in_vcf$Sample <- unique(sampleNames(in_vcf))
-    out_vcf[[in_vcf$Sample[1]]] <- in_vcf
+    out_vcf[[as.character(in_vcf$Sample[1])]] <- in_vcf
         } else{ print("No variants")}
         if(verbose){ print(i)}}
   }
@@ -10492,10 +10492,10 @@ concatenate_vcfs <- function(input,sample_ID=NULL){
 
       if(class(in_vcf)=="VRanges"){
       in_vcf$Sample <- unique(sampleNames(in_vcf))
-      out_vcf[[in_vcf$Sample[1]]] <- in_vcf  } else{ print("No variants")}  
+      out_vcf[[as.character(in_vcf$Sample[1])]] <- in_vcf  } else{ print("No variants")}  
       
     if(verbose){print(i)}}}}
-  
+
   out <- collapse_granges_list(out_vcf)
   return(out)
 }
