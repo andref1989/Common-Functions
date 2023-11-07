@@ -734,7 +734,7 @@ multiple_regression <- function(matrix,feature_list,Gene){
     formula_in <- paste0(feature_list,collapse="+")
     str(formula_in)
     final_formula <- paste0(Gene,"~",formula_in)
-    lm_out <- glm(as.formula(final_formula), data=matrix,maxit=100)
+    lm_out <- bglm(as.formula(final_formula), data=matrix,maxit=100)
     return(lm_out)}
 
 make_conting_table_model_AUC <- function(model_AUC_output,num_steps=20){
@@ -10327,7 +10327,7 @@ get_treatment_naive <- function(earliest_treatment_output){
 
   return(all_metadata)}
 
-tempus_rna_expression_to_mat <- function(rna_df,gene_identifier="Gene", patient_identifier="patient_id"){
+tempus_rna_expression_to_mat <- function(rna_df,gene_identifier="Gene", gene_val_column="log2_gene_tpm_corrected", patient_identifier="patient_id"){
     require(reshape2)
     require(dplyr)
     gene_check <- any(grepl("^Gene$|^gene$", colnames(rna_df)))
@@ -10335,7 +10335,7 @@ tempus_rna_expression_to_mat <- function(rna_df,gene_identifier="Gene", patient_
                                                                                 print("Translating gene codes to symbols")
                                                                                 rna_df$Gene <- translate_ENSMBL_to_HGNC(rna_df$gene_code)}
 
-    rna_mat <- reshape2::dcast(rna_df, as.formula(paste0(gene_identifier,"~", patient_identifier)),value.var="log2_gene_tpm_corrected", fun.aggregate=mean)
+    rna_mat <- reshape2::dcast(rna_df, as.formula(paste0(gene_identifier,"~", patient_identifier)),value.var=gene_val_column, fun.aggregate=mean)
     if(length(unique(rna_mat[,gene_identifier]))==nrow(rna_mat)){
         rownames(rna_mat) <- rna_mat[,gene_identifier]
         rna_mat[,gene_identifier] <- NULL
@@ -10454,19 +10454,19 @@ call_mutations_from_bam <- function(bam, outfile, reference=NULL,regions=NULL,re
                 coord_check <- grepl("[0-9]:[0-9]{1,9}-[0-9]{1,9}|chr[a-zA-Z0-9_]{1,100}:[0-9]{1,9}-[0-9]{1,9}",regions)
                 if(coord_check){ region_flag= "-r"} else{ print("Not a valid location. Region format is \"chr:start-end");stop()}} else{ region_flag="-R"}}
         if(!report_all_bases){
-        cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else { cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")
+        cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -vmO v -o",outfile,sep=" ")} else { cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO v -o",outfile,sep=" ")
 
                                                                                                                             }
         system(cmd)
     } else if(!report_all_bases){
-        cmd <- paste("bcftools mpileup",bam,"-f",reference, "|bcftools call -vmO z -o",outfile,sep=" ")} else {cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO z -o",outfile,sep=" ")}
+        cmd <- paste("bcftools mpileup",bam,"-f",reference, "|bcftools call -vmO v -o",outfile,sep=" ")} else {cmd <- paste("bcftools mpileup",bam,region_flag,regions,"-f",reference, "|bcftools call -mO v -o",outfile,sep=" ")}
     system(cmd)
     
-    if(!grepl(".gz", outfile)){ intfile <- paste0(outfile,".gz")
-    system(paste("mv",intfile, outfile))
-      system(paste0("gunzip ",outfile))
-      } else{ outfile <- outfile}
-    
+##    if(!grepl(".gz", outfile)){ intfile <- paste0(outfile,".gz")
+##    system(paste("mv",intfile, outfile))
+##      system(paste0("gunzip ",outfile))
+##      } else{ outfile <- outfile}
+
     print(outfile)  
 }
 
@@ -10534,3 +10534,146 @@ get_gene_modules <- function(gene_info_file,gene,sep='\t',gene_column="Gene"){
     return(module_of_interest)
   }
 }
+
+
+annotate_melanoma <- function(path, cohort_id) {
+  require(tempusr)
+  require(dplyr)
+
+  # Split up by subtypes or run a model where we can include subtype as covariate
+  tempus_files <- load_tempus_data(path,
+                                   list_files = list("histology",
+                                                     "cancer",
+                                                     "g_molecular_metadata"))
+
+  print(names(tempus_files))
+  hist_rollup <- tempus_files$histology |> # one per patient
+    distinct(patient_id, condition_id, hist = value_concept_canonical_name) |>
+    semi_join(tempus_files$cancer |> dplyr::filter(clinical_status == "primary") |>
+                dplyr::select(condition_id),
+              by = "condition_id") |>
+    group_by(patient_id) |>
+    summarise(hist_rollup = case_when(
+      any(grepl("[Aa]cral", hist)) ~ "acral",
+      any(grepl("[Mm]ucosal", hist)) ~ "mucosal",
+      any(grepl("[Uu]veal|orbital", hist)) ~ "uveal",
+      .default = "other"
+    ), .groups = "drop")
+
+  bx_rollup <- tempus_files$g_molecular_metadata |> # one per patient
+    dplyr::filter(isolate_classification == "tumor", !grepl("xF", isolate_molecular_assay)) |>
+    left_join(tempusr::tissue_rollup, by = join_by(tissue_site_canonical_name)) |>
+    distinct(patient_id, site = tissue_site_canonical_name, tissue_rollup) |>
+    group_by(patient_id) |>
+    summarize(bx_type = case_when(
+      any(site %in% c(
+        "Accessory sinus", "Anal canal", "Anus", "Cervix uteri", "Cheek mucosa",
+        "Colon", "Esophagus", "Ethmoid sinus", "Gum", "Head, face or neck",
+        "Hypopharynx", "Ileum", "Major salivary gland", "Mouth", "Nasal cavity",
+        "Nasopharynx", "Overlapping lesion of rectum, anus and anal canal",
+        "Palate", "Rectum", "Small intestine", "Stomach", "Submandibular gland",
+        "Tongue", "Tonsil", "Transverse colon", "Vagina", "Vulva")
+      ) ~ "mucosal",
+      any(site %in% c("Conjunctiva", "Eye", "Eyelid", "Orbit")) ~ "uveal",
+      any(tissue_rollup == "skin and external organs") ~ "cutaneous",
+      all(is.na(site)) ~ "unknown",
+      .default = "other"
+    ), .groups = "drop")
+
+  dx_rollup <- tempus_files$cancer |> # one per patient
+    dplyr::filter(clinical_status == "primary") |>
+    distinct(patient_id, rollup_organ_system_name)
+
+  merged_subtypes <- dx_rollup |>
+    left_join(hist_rollup, by = "patient_id") |>
+    left_join(bx_rollup, by = "patient_id") |>
+    mutate(subtype = case_when(
+      hist_rollup == "acral" ~ "acral",
+      hist_rollup == "mucosal" ~ "mucosal",
+      rollup_organ_system_name == "Eye and orbit" ~ "uveal",
+      bx_type == "uveal" ~ "uveal",
+      bx_type == "mucosal" ~ "mucosal",
+      rollup_organ_system_name == "Skin" ~ "cutaneous",
+      bx_type == "cutaneous" ~ "cutaneous",
+      .default = "other or unknown"
+    )) |>
+    dplyr::select(patient_id, subtype)
+
+  return(as.data.frame(merged_subtypes))
+}
+
+
+quick_cohort_summary <- function(path, cohort_name,output_format=c("summary","all"),drop_versions=FALSE){
+    require(tempusr)
+    input_td <- load_tempus_data(path, list(c("g_molecular_metadata","metadata")))
+    summary <- input_td$metadata %>% dplyr::filter(!grepl("blood|Blood", tissue_site_canonical_name)) %>% dplyr::select(patient_id,source=isolate_analyte,isolate_classification,assay=isolate_molecular_assay) %>% dplyr::filter(isolate_classification !="normal") %>% unique
+
+    if(drop_versions==TRUE){ summary$assay <- unlist(lapply(summary$assay, function(x) unlist(strsplit(x,"\\."))[1])); summary <- unique(summary) } else{ summary <- summary}
+
+
+    
+    out <- summary %>% group_by(assay) %>% dplyr::summarize(Count= n()) %>% data.frame
+    out$Cohort <- cohort_name
+
+    assay_df <- unique(summary[c("source","assay")])
+
+    rownames(assay_df) <- assay_df[,2]
+    out$Source <- assay_df[out$assay,1]
+    if(output_format =="summary"){
+    return(out)} else if(output_format=="all") { return(list(out,summary))
+    }
+}
+
+vranges_to_df_basic <- function(in_vr,ID=NULL){
+    require(VariantAnnotation)
+    in_vr <- unique(in_vr)
+    df <- data.frame(unlist(seqnames(in_vr)),start(in_vr), end(in_vr),ref(in_vr), alt(in_vr), refDepth(in_vr),altDepth(in_vr))
+    colnames(df) <- c("Chrom","Start","End","Ref","Alt","RefDepth","AltDepth")
+    df$TotalDepth <- df$RefDepth+df$AltDepth
+    df$AlleleFraction <- round(df$AltDepth/df$TotalDepth,3)
+    if(is.null(ID)){ df$Sample <- sampleNames(in_vr)@values} else{ df$Sample <- ID}
+    return(df)}
+
+benchmark_mutation_calls <- function(in_vcf, mmf,patient_ID, assays=c("xE","RS","xT"),var_type="Short Variant",feature="TotalDepth",blacklist_regions=NULL){
+    require(dplyr)
+    require(VariantAnnotation)
+
+    source("~/Andre_F_functions_git/Andre_F_functions.R")
+
+    if(is.character(in_vcf)){ print("Trying to import vcf");test_gr <- readVcfAsVRanges(in_vcf)} else if(class(in_vcf) %in% c("VRanges","GRanges")){ print("Working with the vcf as is"); test_gr <- in_vcf} else{ print("Fatal error occurred"); stop()}
+
+    if(!is.null(blacklist_regions)){ print("Removing blacklisted regions from input vcf file")
+        if(is.character(blacklist_regions)){ blacklist_regions <- bed_to_granges_dynamic(blacklist_regions)} else if(class(blacklist_regions) =="GRanges"){
+        test_gr <- setdiff_with_metadata(test_gr, blacklist_regions)} else { print("Fatal error occurred"); stop()}}
+
+    ref_mmf <- dplyr::filter(mmf, variant_type==var_type,patient_id==patient_ID, grepl(paste0(paste0("^",assays),collapse="|"),assay))
+
+    ref_sub <- dplyr::select(ref_mmf,chromosome,position_1,position_2,reference,alternative,somatic_germline,vaf=variant_allele_freq, coverage, gene=gene_canonical_name,nucleotide_change,AA_change=amino_acid_change, functional_impact)
+    ref_sub$position_2 <- ifelse(is.na(ref_sub$position_2), ref_sub$position_1,ref_sub$position2)
+    ref_gr <- table_to_granges(ref_sub)
+
+
+
+
+
+    in_df <- vranges_to_df_basic(test_gr,patient_ID)
+
+    counter <- round(seq(1, max(in_df[,feature]),length.out=30),0)
+
+    AUPRC_out <- data.frame(stringsAsFactors = F)
+    for(i in counter){
+        sub_gr <- table_to_granges(dplyr::filter(in_df,get(feature)>=i))
+
+##        print(sub_gr)
+##        print(ref_gr)
+        TP <- length(intersect_with_metadata(unique(sub_gr), unique(ref_gr)))
+        FP <- length(setdiff_with_metadata(unique(sub_gr), unique(ref_gr)))
+        FN <- length(setdiff_with_metadata(unique(sub_gr), gr1=unique(ref_gr)))
+        Precision <- TP/(TP+FP)
+        Recall <-  TP/(TP+FN)
+        int <- data.frame(TP,FP,FN,Precision,Recall,patient_ID)
+        AUPRC_out <- rbind(AUPRC_out, int)
+       }
+
+    return(AUPRC_out)
+    }
