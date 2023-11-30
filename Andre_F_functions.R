@@ -5001,6 +5001,7 @@ zscore_df <- function(df, margin=c("row","column"),central_tendency=c("mean","me
     } else if(margin=="column") { if(central_tendency=="mean"){df <- apply(df,2,function(x) (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE))} else if (central_tendency=="median"){ df <- apply(df,2,function(x) (x-median(x,na.rm=TRUE))/sd(x,na.rm=TRUE))} else if (central_tendency=="median_deviation"){ df <- apply(df,2,function(x) (x-median(x,na.rm=TRUE)))}
                                                                                                                                                                                                                                                          }
     df[is.na(df)] <- 0
+    df <- as.data.frame(df)
 
     return(df)}
 
@@ -5533,85 +5534,98 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
     require(lsa)
     require(dplyr)
 
+    tsne_df <- dplyr::filter(tsne_df, get(cluster_column) !="")
     predicted_template_df <- data.frame(stringsAsFactors=F)
 
+
     template_df <- unique(tsne_df[unique(c(cluster_column))])
-##    str(template_df)
+
     template_df <- apply(template_df,2, as.character)
 ##    gene_set <- unique(unlist(lapply(unique(tsne_df[,TF_column]), function(x) unlist(strsplit(x,"-")))))
     gene_set <- rownames(alt_df)
 
 
     if(is.null(templates)==TRUE){
-    templates <- get_template_genes_v2(reference_df, tsne_df,cluster_column,quantile_cutoff=quantile_cutoff,method=method, template_length=template_length, is_ranked=is_ranked,value_returned="Templates",variable_length=variable_length, zscore_cutoff=zscore_cutoff)} else { templates <- templates}
+    templates <- get_template_genes_v2(reference_df, tsne_df,cluster_column,quantile_cutoff=quantile_cutoff,method=method, template_length=template_length, is_ranked=is_ranked,value_returned="Templates",variable_length=variable_length, zscore_cutoff=zscore_cutoff)} else { templates <- lapply(templates, function(x) intersect(x, rownames(alt_df))) }
 
+    if(!is.null(reference_df)){
     if(!all(unique(unlist(templates)) %in% union(rownames(reference_df), rownames(alt_df)))){ print("There are template genes missing from the query dataframe. Dropping missing genes")
     templates <- lapply(templates, function(x) intersect(x, intersect(rownames(reference_df),rownames(alt_df))))} else{ templates <- templates}
-    ##    names(templates) <- sort(unique(template_df$Disease))
+
     print("Finished templates")
-    ## str(templates)
+
+
 ###########
+
     samples <- lapply(sort(unique(template_df[,cluster_column])), function(x) dplyr::filter(tsne_df, get(cluster_column)==x)$Sample)
     names(samples) <- sort(unique(template_df[,cluster_column]))
     samples <- lapply(samples, function(x) intersect(x, colnames(reference_df)))
 
-##    str(samples)
 
-    sample_template_list <- lapply(names(samples), function(x) rowMeans(reference_df[templates[[x]],samples[[x]]],na.rm=TRUE))
-##    str(sample_template_list)
-    if(template_to_1==TRUE){
-    for(x in 1:length(sample_template_list)){ int_ref <- sample_template_list[[x]]; int_ref[1:length(int_ref)] <- 1; sample_template_list[[x]] <- int_ref}} else { sample_template_list <- sample_template_list}
 
-        names(sample_template_list) <- sort(unique(template_df[,cluster_column]))
-    ##str(sample_template_list)
-##    str(template_df)
-##    str(sample_template_list)
+    sample_template_list <- lapply(names(samples), function(x) rowMeans(reference_df[templates[[x]],samples[[x]]],na.rm=TRUE))} else if(is.null(reference_df)){
+
+                                                                                                                                  templates2 <- lapply(templates, function(x) unique(c(intersect(x, rownames(alt_df)), setdiff(x, x=unlist(templates)))))
+                                                                                                                                  names(templates2) <- names(templates)
+
+                                                                                                                                  sample_template_list <- list()
+                                                                                                                                  for(i in names(templates)){
+                                                                                                                                      vec <- templates2[[i]]
+                                                                                                                                      index <- which(vec %in% templates[[i]])
+                                                                                                                                      out_vec <- rep(0,length(vec)); names(out_vec) <- vec
+                                                                                                                                      out_vec[index] <- 1
+                                                                                                                                                                                                                                                                       sample_template_list[[i]] <- out_vec}
+
+                                                                                                                                  templates <- templates2 }
+
+    str(names(templates))
+
 
 #######################
 #######################
 
     for(i in colnames(alt_df)){
-##        str(i)
-##        str(alt_df)
 
-        distance_list <- unlist(lapply(sort(unique(template_df[,cluster_column])), function(x) 1-cosine(alt_df[templates[[x]],i],sample_template_list[[x]])))
-        names(distance_list) <- sort(unique(template_df[,cluster_column]))
+        print(i)
 
- ##       str(distance_list)
+        distance_list <- unlist(lapply(sort(unique(names(templates))), function(x) 1-cosine(alt_df[templates[[x]],i],sample_template_list[[x]])))
+        names(distance_list) <- sort(unique(names(templates)))
+
 
         random_list <- list()
         for(k in names(templates)){
-  ##          print(k)
-            random_list[[k]] <- unlist(lapply(1:random_sample, function(x) 1-cosine(alt_df[sample(gene_set, length(templates[[k]])),i],sample_template_list[[k]])))
-  ##          str(random_list)
+            random_list[[k]] <- unlist(lapply(1:random_sample, function(x) 1-cosine(alt_df[sample(gene_set, length(sample_template_list[[k]])),i],sample_template_list[[k]])))
+            random_list[[k]] <- random_list[[k]][!is.na(random_list[[k]])]
+
+
 
         }
-        #lapply(random_list,function(x) print(summary(x)))
+
+
 
         pval_list <- unlist(lapply(names(distance_list), function(x) 1-pnorm(distance_list[[x]],mean(random_list[[x]]),sd(random_list[[x]]),lower.tail=F)))
+##        str(pval_list)
         names(pval_list) <- names(distance_list)
-        ###print(distance_list)
-        ###print("Pvalue=")
-        ###print(pval_list)
+
         candidate_template_df <- data.frame(pval_list,distance_list,names(distance_list),i,stringsAsFactors=F)
         colnames(candidate_template_df) <- c("P_val","Distance","Template","Cell_Line")
         candidate_template_df$Q_val <- p.adjust(candidate_template_df$P_val,method="BH")
         candidate_template_df$Signif <- candidate_template_df$Q_val <= 0.1
         sub_df <- dplyr::filter(candidate_template_df, Signif==TRUE)
-##        str(candidate_template_df)
-##        str(sub_df)
-        if(nrow(sub_df) >=1){
-            ##print("Working 1")
-            candidate_template_df$Prediction <- sub_df[which(sub_df$Distance == min(sub_df$Distance)),"Template"]} else if (nrow(sub_df) == 0){
-                ##print("Working 2")
-                candidate_template_df$Prediction <- candidate_template_df[which(candidate_template_df$Distance == min(candidate_template_df$Distance,na.rm=TRUE)),"Template"]}
-##        str(candidate_template_df)
 
-##        str(random_list)
+        if(nrow(sub_df) >=1){
+
+            candidate_template_df$Prediction <- sub_df[which(sub_df$Distance == min(sub_df$Distance)),"Template"]} else if (nrow(sub_df) == 0){
+
+                candidate_template_df$Prediction <- candidate_template_df[which(candidate_template_df$Distance == min(candidate_template_df$Distance,na.rm=TRUE)),"Template"]}
+
+
+
         predicted_template_df <- rbind(predicted_template_df,candidate_template_df)                                      
-                                        #str(sub_df)
+
         if(verbose==TRUE){
-        print(paste0("Finished ", grep(paste0("^",i,"$"), colnames(alt_df)), " of ",ncol(alt_df)))} 
+            print(paste0("Finished ", grep(paste0("^",i,"$"), colnames(alt_df)), " of ",ncol(alt_df)))}
+
     }
 
     output <- list(templates,predicted_template_df,sample_template_list)
@@ -10194,6 +10208,37 @@ new_pathos_RMD <- function(report_title,rootdir="~/",default_rmd="/Users/forbesa
 
     else{ print("No output report path specified, stopping!"); stop()}}
 
+
+new_prepare_hybrid_network <- function(net_name_variable, wgcna_net_rds,wgcna_beta_tom,mediation_file,BN_digraph,default_prepare_r="/Users/forbesa/p0069_prepare_network.R",out_prepare_r=NULL){
+        if(!is.null(out_prepare_r)){
+        system(paste0("cp ", default_prepare_r," ",out_prepare_r))
+        system(paste0("sed -i '' 's/net_name_variable/",net_name_variable,"/g' ",out_prepare_r))
+        system(paste0("sed -i '' 's#wgcna_net_rds#",wgcna_net_rds,"#g' ",out_prepare_r))
+        system(paste0("sed -i '' 's#wgcna_beta_tom#",wgcna_beta_tom,"#g' ",out_prepare_r))
+        system(paste0("sed -i '' 's#mediation_file#",mediation_file,"#g' ",out_prepare_r))
+        system(paste0("sed -i '' 's#BN_digraph#",BN_digraph,"#g' ",out_prepare_r))
+    }
+
+    else{ print("No output path specified, stopping!"); stop()}}
+
+new_create_network <- function(net_name_variable, wgcna_net_rds,wgcna_beta_tom,cm_file,BN_digraph,include_cm=TRUE,default_create_r="/Users/forbesa/p0069_create_network.R",out_create_r=NULL){
+
+        if(!is.null(out_create_r)){
+        system(paste0("cp ", default_create_r," ",out_create_r))
+        system(paste0("sed -i '' 's/net_name_variable/",net_name_variable,"/g' ",out_create_r))
+        system(paste0("sed -i '' 's#wgcna_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
+        system(paste0("sed -i '' 's#wgcna_beta_tom#",wgcna_beta_tom,"#g' ",out_create_r))
+        system(paste0("sed -i '' 's#cm_file#",cm_file,"#g' ",out_create_r))
+        system(paste0("sed -i '' 's#BN_digraph#",mediation_file,"#g' ",out_create_r))
+    } else{ print("No output path specified, stopping!"); stop()}
+
+    if(include_cm==TRUE){
+        cm_out <- "c(TRUE,TRUE,TRUE,TRUE)"
+        system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} else{
+                                                                                 cm_out <- "c(TRUE,FALSE,FALSE,FALSE)"
+                                                                                 system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} }
+
+
 freq_table_to_matrix <- function(df, row_name, column_name,value_name="Freq",default_fill=0){
     df_mat <- matrix(default_fill, nrow=length(unique(df[,row_name])),ncol=length(unique(df[,column_name])))
     rownames(df_mat) <- unique(df[,row_name])
@@ -10294,9 +10339,13 @@ pdx_index <- tempus_data$cancer %>% dplyr::filter(clinical_status == "primary") 
     group_by(patient_id) |> 
     arrange(effective_date_start_year_indexed, !!sym(medication_date_col)) |> 
     slice(1) |> 
-    select(patient_id, 
-           med_start_index = effective_date_start_days_from_index, 
-           med_year_index = effective_date_start_year_indexed) %>% ungroup()
+    dplyr::select(patient_id, 
+                  med_start_index = effective_date_start_days_from_index,
+                  med_start_date_index = effective_date_start_indexed,
+           med_year_index = effective_date_start_year_indexed,
+           drug_name=drug_class_name,
+           drug_class=drug_class_group_name
+           ) %>% ungroup()
 
 
     out <- list()
@@ -10307,7 +10356,7 @@ pdx_index <- tempus_data$cancer %>% dplyr::filter(clinical_status == "primary") 
 
 get_treatment_naive <- function(earliest_treatment_output){
   treatment_naive <- all_metadata |> 
-    select(patient_id, sample_id, biopsy_index = date_biopsy, biopsy_year = year_biopsy) |> 
+    dplyr::select(patient_id, sample_id, biopsy_index = date_biopsy, biopsy_year = year_biopsy) |> 
     left_join(pdx_index, by = "patient_id") |> 
     left_join(first_medication, by = "patient_id") |> 
     mutate(treatment_naive = case_when(
@@ -10318,7 +10367,7 @@ get_treatment_naive <- function(earliest_treatment_output){
 
   all_metadata <- all_metadata |> 
     left_join(treatment_naive |> 
-                select(sample_id, treatment_naive), 
+                dplyr::select(sample_id, treatment_naive), 
               by = "sample_id") |> 
     mutate(treatment_naive_primary = case_when(
       treatment_naive == TRUE & primary_tumor == TRUE ~ TRUE, 
@@ -10634,23 +10683,31 @@ vranges_to_df_basic <- function(in_vr,ID=NULL){
     if(is.null(ID)){ df$Sample <- sampleNames(in_vr)@values} else{ df$Sample <- ID}
     return(df)}
 
-benchmark_mutation_calls <- function(in_vcf, mmf,patient_ID, assays=c("xE","RS","xT"),var_type="Short Variant",feature="TotalDepth",blacklist_regions=NULL){
+benchmark_mutation_calls <- function(in_vcf, mmf,patient_ID, assays=c("xE","RS","xT"),var_type="Short Variant",feature="TotalDepth",blacklist_regions=NULL,verbose=FALSE){
     require(dplyr)
     require(VariantAnnotation)
 
     source("~/Andre_F_functions_git/Andre_F_functions.R")
 
-    if(is.character(in_vcf)){ print("Trying to import vcf");test_gr <- readVcfAsVRanges(in_vcf)} else if(class(in_vcf) %in% c("VRanges","GRanges")){ print("Working with the vcf as is"); test_gr <- in_vcf} else{ print("Fatal error occurred"); stop()}
+    if(is.character(in_vcf)){ print("Trying to import vcf");test_gr <- readVcfAsVRanges(in_vcf)} else if(class(in_vcf) %in% c("VRanges","GRanges")){ if(verbose){print("Working with the vcf as is")}; test_gr <- in_vcf} else{ print("Fatal error occurred"); stop()}
 
-    if(!is.null(blacklist_regions)){ print("Removing blacklisted regions from input vcf file")
-        if(is.character(blacklist_regions)){ blacklist_regions <- bed_to_granges_dynamic(blacklist_regions)} else if(class(blacklist_regions) =="GRanges"){
+
+    if(!is.null(blacklist_regions)){ if(verbose){print("Removing blacklisted regions from input vcf file")}
+        if(is.character(blacklist_regions)){ blacklist_regions <- bed_to_granges_dynamic(blacklist_regions)} else if(class(blacklist_regions) %in% c("GRanges","UnstitchedGPos")){
         test_gr <- setdiff_with_metadata(test_gr, blacklist_regions)} else { print("Fatal error occurred"); stop()}}
+
 
     ref_mmf <- dplyr::filter(mmf, variant_type==var_type,patient_id==patient_ID, grepl(paste0(paste0("^",assays),collapse="|"),assay))
 
+##    str(ref_mmf)
     ref_sub <- dplyr::select(ref_mmf,chromosome,position_1,position_2,reference,alternative,somatic_germline,vaf=variant_allele_freq, coverage, gene=gene_canonical_name,nucleotide_change,AA_change=amino_acid_change, functional_impact)
-    ref_sub$position_2 <- ifelse(is.na(ref_sub$position_2), ref_sub$position_1,ref_sub$position2)
+
+    ref_sub$position_2 <- ifelse(nchar(ref_sub$position_2)==0,NA,ref_sub$position_2)
+    ref_sub$position_2 <- ifelse(is.na(ref_sub$position_2), ref_sub$position_1,ref_sub$position_2)
+
     ref_gr <- table_to_granges(ref_sub)
+    if(!is.null(blacklist_regions)){ ref_gr <- setdiff_with_metadata(ref_gr,blacklist_regions)}
+
 
 
 
@@ -10658,16 +10715,25 @@ benchmark_mutation_calls <- function(in_vcf, mmf,patient_ID, assays=c("xE","RS",
 
     in_df <- vranges_to_df_basic(test_gr,patient_ID)
 
+##    str(in_df)
     counter <- round(seq(1, max(in_df[,feature]),length.out=30),0)
 
-    AUPRC_out <- data.frame(stringsAsFactors = F)
+
+    TP <- length(unique(ref_gr))
+    FP <- 3.1e9-TP
+    FN <- 0
+    Precision <- TP/(TP+FP)
+    Recall <-  TP/(TP+FN)
+
+    AUPRC_out <- data.frame(TP,FP,FN,Precision,Recall,patient_ID)
+
     for(i in counter){
         sub_gr <- table_to_granges(dplyr::filter(in_df,get(feature)>=i))
 
 ##        print(sub_gr)
 ##        print(ref_gr)
-        TP <- length(intersect_with_metadata(unique(sub_gr), unique(ref_gr)))
-        FP <- length(setdiff_with_metadata(unique(sub_gr), unique(ref_gr)))
+        TP <- length(unique(intersect_with_metadata(unique(sub_gr), unique(ref_gr))))
+        FP <- length(unique(setdiff_with_metadata(unique(sub_gr),unique(ref_gr))))
         FN <- length(setdiff_with_metadata(unique(sub_gr), gr1=unique(ref_gr)))
         Precision <- TP/(TP+FP)
         Recall <-  TP/(TP+FN)
@@ -10676,4 +10742,142 @@ benchmark_mutation_calls <- function(in_vcf, mmf,patient_ID, assays=c("xE","RS",
        }
 
     return(AUPRC_out)
+    }
+
+hard_filter_vcf <- function(in_vcf, QUAL_val=10,MQBZ_val=-3,RPBZ_val=0.3,SCBZ_val=3,DP_val=NULL){
+    require(dplyr)
+
+    ##DP should be a value between 0 and 0.5 representing how much of the upper and lower ends of the distribution to remove or a value larger than 1
+
+    in_vcf <- unique(in_vcf)
+    in_vcf$index <- 1:length(in_vcf)
+    if(is.null(DP_val)){
+        metadata <- as.data.frame(in_vcf@elementMetadata@listData[c("QUAL","MQBZ","RPBZ","SCBZ","index")])
+} else {
+
+                                                                                                      metadata <- as.data.frame(in_vcf@elementMetadata@listData[c("QUAL","MQBZ","RPBZ","SCBZ","DP","index")])
+
+    if(DP_val <=0.5){
+                     quantiles <- quantile(metadata$DP, c(DP_val, 1-DP_val))
+                     metadata <- dplyr::filter(metadata, DP >=quantiles[1] & DP <= quantiles[2])} else if (DP_val >1){ metadata <- dplyr::filter(metadata, DP > DP_val)} else{ print("Fatal error has occured with DP parameter")}
+
+                                                                                                  }
+
+    params <- formals()
+    params <- params[2:length(params)]
+
+##    print(params)
+    metadata <- dplyr::filter(metadata, QUAL>=QUAL_val, MQBZ>=MQBZ_val,SCBZ<=SCBZ_val,abs(RPBZ)<=RPBZ_val)
+
+    out_vcf <- in_vcf[metadata$index]
+
+    return(out_vcf)
+}
+
+
+
+
+convert_genes_Mm_to_Hs <- function(gene_list, convert_from_ENSEMBL = FALSE, return_ENSEMBL = TRUE,ref_database=NULL){
+    require(org.Mm.eg.db)
+    require(org.Hs.eg.db)
+    if(is.null(ref_database)){
+        mouse_human_genes <- read.csv("http://www.informatics.jax.org/downloads/reports/HOM_MouseHumanSequence.rpt",sep="\t")} else{ mouse_human_genes <- ref_database}
+##David Woods function  
+#Convert input genes from ENSEMBL to Symbols
+
+  if(convert_from_ENSEMBL == TRUE) {
+    gene_list = AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, 
+                                      keys=gene_list, 
+                                      keytype = "ENSEMBL",
+                                      column = "SYMBOL")
+  }
+  
+    output = data.frame(stringsAsFactors = F)
+
+  for(gene in gene_list){
+    class_key = mouse_human_genes  %>%  
+      dplyr::filter(Symbol == gene & Common.Organism.Name == "mouse, laboratory") %>% 
+      dplyr::pull(DB.Class.Key)
+    
+    if(!identical(class_key, integer(0)) ){
+      human_gene = mouse_human_genes %>% 
+        dplyr::filter(DB.Class.Key == class_key & Common.Organism.Name== "human") %>% 
+          dplyr::pull(Symbol)
+
+
+if(length(human_gene) ==0){ output <- output } else{
+      int <- data.frame(gene, human_gene)
+      output = rbind(output, int) 
+    }}}
+
+
+
+  #Convert back to ENSEMBL
+  if(return_ENSEMBL == TRUE){
+    output = unname(AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, 
+                                          keys=output, 
+                                          keytype = "SYMBOL",
+                                          column = "ENSEMBL"))
+  }
+  return (output)
+}
+
+plot_sankey <- function(regimen_table,treatment_lines=5, num_drug_classes=6,num_drug_names=5,drop_untreated=FALSE,plot_option=c("Drug","Class","Both")){
+    require(forcats)
+    require(dplyr)
+    require(tidyr)
+    require(ggsankey)
+
+
+    regimen_summary <- regimen_table %>%
+        dplyr::select(patient_id,Rank=regimen_rank,Drug_Name=regimen_name,
+                      Drug_Class=regimen_class,Class_Group=regimen_class_group) %>%
+        group_by(patient_id) %>% mutate(Rank2=paste0(1:length(Rank),"L")) %>% ungroup %>%
+        group_by(Rank2) %>% mutate(Drug_Name2 = forcats::fct_lump(Drug_Name, n = num_drug_names)) %>%
+        ungroup %>% group_by(Rank2) %>%
+        mutate(Class_Group2=forcats::fct_lump(Class_Group, n=num_drug_classes)) %>%
+        ungroup
+    regimen_summary <- regimen_summary %>% group_by(patient_id) %>%
+        arrange(patient_id,Rank2) %>% ungroup %>% data.frame
+
+
+    regimen_sankey <- regimen_summary %>% dplyr::select(patient_id,Treatment_Line=Rank2,Drug=Drug_Name2,Class=Class_Group2) %>% ungroup
+
+    regimen_sankey_class <- regimen_sankey %>% tidyr::pivot_wider(id_cols=patient_id,names_from=Treatment_Line,values_from=Class)
+    regimen_sankey_drug <- regimen_sankey %>% tidyr::pivot_wider(id_cols=patient_id,names_from=Treatment_Line,values_from=Drug)
+
+
+    all_lines <- unique(regimen_summary$Rank2)
+    treatment_cols <- intersect(paste0(1:treatment_lines,"L"),all_lines)
+
+
+    regimen_sankey_class_final <- regimen_sankey_class %>% make_long(treatment_cols)
+    regimen_sankey_drug_final <- regimen_sankey_drug %>% make_long(treatment_cols)
+
+
+
+    sankey_theme <- theme(axis.text.x=element_text(face='bold',size=6,angle=15,hjust=1),axis.text.y=element_text(face='bold',size=8),strip.text = element_text(colour = "black", face = "bold",size=10),plot.title=element_text(hjust=0.5))
+
+
+    if(drop_untreated){
+        regimen_sankey_class_final <- regimen_sankey_class_final %>% drop_na(node)
+        regimen_sankey_drug_final <- regimen_sankey_drug_final %>% drop_na(node)} else{
+                                                                                    regimen_sankey_class_final <- regimen_sankey_class_final %>% replace_na(list(node="No F/U"))
+                                                                                    regimen_sankey_drug_final <- regimen_sankey_drug_final %>% replace_na(list(node="No F/U"))
+                                                                                    }
+
+    if(plot_option=="Drug"){
+        p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title="Patient treatment lines by drug name")+xlab("Treatment Line")+ylab("Num. Patients")
+        print(p2)} else if(plot_option=="Class"){
+                     p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title="Patient treatment lines by drug class")+xlab("Treatment Line")+ylab("Num. Patients")
+                     print(p)
+} else if(plot_option=="Both"){
+
+    p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title="Patient treatment lines by drug class")+xlab("Treatment Line")+ylab("Num. Patients")
+                     print(p)
+
+    p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title="Patient treatment lines by drug name",)+xlab("Treatment Line")+ylab("Num. Patients")
+    print(p2)
+}
+
     }
