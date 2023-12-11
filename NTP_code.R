@@ -1813,7 +1813,7 @@ parse_ypredict_outputs <- function(dir, Peak_gr, cutoff=0.5,peak_cutoff=-0.5,pea
 
 weighted_graph_from_edgelist <- function(edgelist, column=3){
     graph_out <- graph_from_edgelist(as.matrix(edgelist[c(1,2)]))
-    E(graph_out)$weight <- edgelist[,column]
+    E(graph_out)$weight <- 1
     return(graph_out)
 
 }
@@ -5402,7 +5402,7 @@ nearest_template_prediction_v2 <- function(reference_df,alt_df, tsne_df, cluster
 }
 
 get_template_genes_v2 <- function(expression_df, tsne_df, cluster_column="Cluster",is_ranked=TRUE,quantile_cutoff=0.5, method=c("simple","randomforest"),template_length=50,value_returned=c("Templates","Matrix"),variable_length=TRUE,zscore_cutoff=1.8,abs_val=FALSE,sig_limit=1000){
-
+    require(randomForest)
     require(dplyr)
     source("~/Andre_F_functions.R")
 
@@ -5470,7 +5470,6 @@ get_template_genes_v2 <- function(expression_df, tsne_df, cluster_column="Cluste
                                   }}
 
     else if(method == "randomforest"){
-                                          require(randomForest)
         rownames(sub_df) <- gsub("-","_",rownames(sub_df))
         ##str(sub_df)
 ##        sub_df <- sub_df[names(get_most_variable(sub_df, "row",quantile=quantile_cutoff)),] 
@@ -5558,16 +5557,13 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
 
 ###########
 
-    samples <- lapply(sort(unique(template_df[,cluster_column])), function(x) dplyr::filter(tsne_df, get(cluster_column)==x)[,sample_col])
+    samples <- lapply(sort(unique(template_df[,cluster_column])), function(x) dplyr::filter(tsne_df, get(cluster_column)==x)$Sample)
     names(samples) <- sort(unique(template_df[,cluster_column]))
     samples <- lapply(samples, function(x) intersect(x, colnames(reference_df)))
 
 
 
-    sample_template_list <- lapply(names(samples), function(x) rowMeans(reference_df[templates[[x]],samples[[x]]],na.rm=TRUE))
-    names(sample_template_list) <- names(samples)
-
-    } else if(is.null(reference_df)){
+    sample_template_list <- lapply(names(samples), function(x) rowMeans(reference_df[templates[[x]],samples[[x]]],na.rm=TRUE))} else if(is.null(reference_df)){
 
                                                                                                                                   templates2 <- lapply(templates, function(x) unique(c(intersect(x, rownames(alt_df)), setdiff(x, x=unlist(templates)))))
                                                                                                                                   names(templates2) <- names(templates)
@@ -5578,14 +5574,11 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
                                                                                                                                       index <- which(vec %in% templates[[i]])
                                                                                                                                       out_vec <- rep(0,length(vec)); names(out_vec) <- vec
                                                                                                                                       out_vec[index] <- 1
-                                                                                                                                      sample_template_list[[i]] <- out_vec}
+                                                                                                                                                                                                                                                                       sample_template_list[[i]] <- out_vec}
+
                                                                                                                                   templates <- templates2 }
 
-    
-
-##    str(names(templates))
-##    str(templates)
-##    str(sample_template_list)
+    str(names(templates))
 
 
 #######################
@@ -5593,11 +5586,9 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
 
     for(i in colnames(alt_df)){
 
-        if(verbose){
-        print(i)}
-        distance_list <- unlist(lapply(sort(unique(names(templates))), function(x) 1-cosine(alt_df[templates[[x]],i],sample_template_list[[x]])))
-###        str(distance_list)
+        print(i)
 
+        distance_list <- unlist(lapply(sort(unique(names(templates))), function(x) 1-cosine(alt_df[templates[[x]],i],sample_template_list[[x]])))
         names(distance_list) <- sort(unique(names(templates)))
 
 
@@ -6674,19 +6665,14 @@ DGTAC_validation <- function(TF_bed,peak_gene_bed,TF, TF_targets,TF_cutoff=700,e
     return(out)}
 
 translate_ENSMBL_to_HGNC <- function(ENSEMBL_IDs,version="EnsDb.Hsapiens.v79",key="GENEID", column="GENENAME",split=TRUE){
-    ##require(version,character.only=T)
-    require(tempusr)
+    require(version,character.only=T)
     if(split==TRUE){ENSEMBL_IDs <- unlist(lapply(ENSEMBL_IDs, function(x) unlist(strsplit(x,"\\."))[1]))} else { ENSEMBL_IDs <- ENSEMBL_IDs}
 
-##    ENSEMBL_IDs <- unique(ENSEMBL_IDs)
+    ENSEMBL_IDs <- unique(ENSEMBL_IDs)
 ##    str(ENSEMBL_IDs)
-    ##    symbols <- ensembldb::select(get(version),keys=ENSEMBL_IDs,keytype=key, columns=column)
-    gene_df <- tempusr::gene_annotation
-    rownames(gene_df) <- gene_df$ensembl_gene_id
-    
-    
-    ##   final_symbols <- gene_df[ENSEMBL_IDs,2]
-    final_symbols <- gene_df[ENSEMBL_IDs,"hgnc_symbol"]
+    symbols <- ensembldb::select(get(version),keys=ENSEMBL_IDs,keytype=key, columns=column)
+    rownames(symbols)  <- symbols[,1]
+    final_symbols <- symbols[ENSEMBL_IDs,2]
     return(final_symbols)}
 
 make_and_run_fishers_exact_vectors <- function(vec, universe, truth_set,label=NULL,alternative_opt=c("two.sided","greater","less"),log_OR=TRUE){
@@ -7322,7 +7308,7 @@ plot_NTP_heatmaps <- function(NTP_output,metadata_df,column="Disease",pals="Grey
     indices <- c()
     for(i in 1:nrow(df_mat)){
         best <- sort(df_mat[i,],sort_order=TRUE)
-        best_available <- best[setdiff(names(bests),j_blacklist)]
+        best_available <- best[setdiff(names(best),j_blacklist)]
         if(best_available[1] >=0.2) {j_blacklist <- c(j_blacklist,names(best_available[1])); indices <- c(indices,rownames(df_mat)[i])} else{ j_blacklist <- j_blacklist; indices <- indices}
         
             
@@ -10837,16 +10823,13 @@ if(length(human_gene) ==0){ output <- output } else{
   return (output)
 }
 
-
-plot_sankey <- function(regimen_table,treatment_lines=5, num_drug_classes=6,num_drug_names=5,drop_untreated=FALSE,plot_option=c("Drug","Class","Both"),title=NULL,show_legend=FALSE){
+plot_sankey <- function(regimen_table,treatment_lines=5, num_drug_classes=6,num_drug_names=5,drop_untreated=FALSE,plot_option=c("Drug","Class","Both")){
     require(forcats)
     require(dplyr)
     require(tidyr)
     require(ggsankey)
 
 
-    if(length(plot_option) >1){
-        plot_option <- "Both"} else{ plot_option <- plot_option}
     regimen_summary <- regimen_table %>%
         dplyr::select(patient_id,Rank=regimen_rank,Drug_Name=regimen_name,
                       Drug_Class=regimen_class,Class_Group=regimen_class_group) %>%
@@ -10874,194 +10857,28 @@ plot_sankey <- function(regimen_table,treatment_lines=5, num_drug_classes=6,num_
 
 
 
+    sankey_theme <- theme(axis.text.x=element_text(face='bold',size=6,angle=15,hjust=1),axis.text.y=element_text(face='bold',size=8),strip.text = element_text(colour = "black", face = "bold",size=10),plot.title=element_text(hjust=0.5))
+
+
     if(drop_untreated){
         regimen_sankey_class_final <- regimen_sankey_class_final %>% drop_na(node)
         regimen_sankey_drug_final <- regimen_sankey_drug_final %>% drop_na(node)} else{
                                                                                     regimen_sankey_class_final <- regimen_sankey_class_final %>% replace_na(list(node="No F/U"))
                                                                                     regimen_sankey_drug_final <- regimen_sankey_drug_final %>% replace_na(list(node="No F/U"))
                                                                                     }
-    title1 <- ifelse(is.null(title),"Patient treatment lines by drug class",title)
-    title2 <- ifelse(is.null(title),"Patient treatment lines by drug name",title)
-
-    sankey_theme <- theme(axis.text.x=element_text(face='bold',size=6,angle=15,hjust=1),axis.text.y=element_text(face='bold',size=8),strip.text = element_text(colour = "black", face = "bold",size=10),plot.title=element_text(hjust=0.5),legend.position="bottom")
-
-    guide_name <- guides(fill=guide_legend(title=ifelse(plot_option=="Both","Drug Class/Name",ifelse(plot_option=="Drug","Drug Name","Drug Class"))))
-
 
     if(plot_option=="Drug"){
-        p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=show_legend,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title=title2)+xlab("Treatment Line")+ylab("Num. Patients")+guide_name
-        return(p2)
-    } else if(plot_option=="Class"){
-                     p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=show_legend,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title=title1)+xlab("Treatment Line")+ylab("Num. Patients")+guide_name
-                     return(p)
+        p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title="Patient treatment lines by drug name")+xlab("Treatment Line")+ylab("Num. Patients")
+        print(p2)} else if(plot_option=="Class"){
+                     p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0)+sankey_theme+labs(title="Patient treatment lines by drug class")+xlab("Treatment Line")+ylab("Num. Patients")
+                     print(p)
 } else if(plot_option=="Both"){
 
-
-    p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=show_legend,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title=title1)+xlab("Treatment Line")+ylab("Num. Patients")+guide_name
+    p <- ggplot(regimen_sankey_class_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title="Patient treatment lines by drug class")+xlab("Treatment Line")+ylab("Num. Patients")
                      print(p)
 
-    p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=show_legend,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title=title2)+xlab("Treatment Line")+ylab("Num. Patients")+guide_name
+    p2 <- ggplot(regimen_sankey_drug_final,aes(x=x, next_x=next_x, node=node,next_node=next_node,label=node,fill=as.factor(node)))+geom_sankey(show.legend=F,node.color=1)+geom_sankey_text(size = 3, color = "black", hjust = 0.25,position=position_nudge(x=0.1))+sankey_theme+labs(title="Patient treatment lines by drug name",)+xlab("Treatment Line")+ylab("Num. Patients")
     print(p2)
-} else { print("Not a valid plotting option"); stop()}
-
-    }
-
-
-plot_hybrid_network_modules <- function(hybrid_net,title=NULL,module1="ensembl_id_1_module",module2="ensembl_id_2_module",drop_low_freq=FALSE,drop0=FALSE,highlight_gene=NULL,highlight_module=NULL,net_layout="seham"){
-    require(igraph)
-    require(ggnetwork)
-    require(tidyr)
-    require(ggplot2)
-    require(tempusr)
-    require(scales)
-
-
-
-### Transform hybrid network so that undirected edges are converted to bidirectional edges for the sake of visualization
-    sub <- dplyr::filter(hybrid_net, directed==TRUE)
-    int <- dplyr::filter(hybrid_net, directed==FALSE)
-    sub2 <- int
-    genelist1 <- int$ensembl_id_1
-    genelist2 <- int$ensembl_id_2
-    int$ensembl_id_1 <- genelist2
-    int$ensembl_id_2 <- genelist1
-    sub2 <- rbind(sub2, int)
-    hybrid_net <- rbind(sub,sub2)
-
-### Get HGNC symbols
-    gene_df <- tempusr::gene_annotation; rownames(gene_df) <- gene_df[,1]
-
-    hybrid_net$Gene1 <- gene_df[hybrid_net[,"ensembl_id_1"],"hgnc_symbol"]
-    hybrid_net$Gene2 <- gene_df[hybrid_net[,"ensembl_id_2"],"hgnc_symbol"]
-
-
-### Remove genes in Module 0/Grey if requested
-    if(drop0){ hybrid_net <- dplyr::filter(hybrid_net, ensembl_id_1_module!=0,ensembl_id_2_module!=0)} else{ print("Not removing Module 0/Gray module")}
-
-### highlight gene workflow
-
-        if(!is.null(highlight_gene) & is.null(highlight_module)){
-            print("Highlighting gene")
-            hybrid_net$Edge_Color <- "black"
-            if(all(grepl("ENSG[0-9]{11}",highlight_gene))){ gene_id_col <- c("ensembl_id_1","ensembl_id_2")} else{ gene_id_col <- c("Gene1","Gene2")}
-            print(gene_id_col)
-            index <- lapply(gene_id_col, function(x) which(hybrid_net[,x] %in% highlight_gene))
-
-            if(length(unlist(index)) ==0 & drop0 ){
-                print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
-            } else if(length(unlist(index))==0 & !drop0) {
-                print("Couldn't find your gene of interest in the network. Not highlighting any genes")} else{
-                                                                                                           hybrid_net$Edge_Color[index[[1]]] <- "red"
-                                                                                                           hybrid_net$Edge_Color[index[[2]]] <- "green"
-                                                                                                       }} else if (is.null(highlight_gene) & !is.null(highlight_module)){
-            print("Highlighting module")
-            hybrid_net$Edge_Color <- "black"
-
-            index <- lapply(c(module1,module2), function(x) which(hybrid_net[,x] %in% highlight_module))
-            if(length(unlist(index)) ==0 & drop0 ){
-                print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
-            } else if(length(unlist(index))==0 & !drop0) {
-                print("Couldn't find your gene of interest in the network. Not highlighting any genes")} else{
-                                                                                                           hybrid_net$Edge_Color[index[[1]]] <- "red"
-                                                                                                           hybrid_net$Edge_Color[index[[2]]] <- "green"}
-                                                                                                        } else{ print("Not highlighting anything")
-                                                                                                            hybrid_net$Edge_Color <- "black"}
-
-
-    hybrid_net_summary <- lapply(unique(hybrid_net$Edge_Color), function(x) as.data.frame(table(dplyr::filter(hybrid_net, Edge_Color==x)[c("ensembl_id_1_module","ensembl_id_2_module")])))
-    for(i in 1:length(hybrid_net_summary)){ hybrid_net_summary[[i]]$Edge_Color <- unique(hybrid_net$Edge_Color)[i]}
-    hybrid_net_summary <- do.call("rbind", hybrid_net_summary)
-
-
-
-    hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2],2, function(x) as.integer(as.character(x)))
-    hybrid_net_summary[,4] <- as.character(hybrid_net_summary[,4])
-
-    colnames(hybrid_net_summary) <- c("Module1","Module2","Edge_Count","Edge_Color")
-
-    hybrid_count <- dplyr::select(hybrid_net, Module1=ensembl_id_1_module,Gene=ensembl_id_1) %>% unique %>% group_by(Module1) %>% dplyr::summarize(Module_Node_Count=n())
-    if(drop_low_freq){
-        cutoff_val <- sum(hybrid_count)*0.01
-        hybrid_net_summary <- dplyr::filter(hybrid_net_summary, Edge_Count>=cutoff_val)   }
-
-
-    hybrid_net_summary <- left_join(hybrid_net_summary, hybrid_count, by="Module1") %>% group_by(Module1) %>% mutate(Edge_Weight= Edge_Count/Module_Node_Count) %>% ungroup
-
-    hybrid_net_summary$Area <- rescale(hybrid_net_summary$Module_Node_Count,to =c(2,20))
-
-    hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2],2, function(x) as.character(x))
-
-
-    if(!is.null(highlight_gene)){
-
-        print("Working gene")
-
-        net_list <- lapply(unique(hybrid_net_summary$Edge_Color), function(x) dplyr::filter(hybrid_net_summary, Edge_Color==x))
-##        for(i in 1:length(net_list)){  sub <- net_list[[i]]; sub$Edge_ID <- 1:nrow(sub); net_list[[i]] <- sub}
-
-        net_list[[1]]$Edge_ID <- 1:nrow(net_list[[1]])
-        net_out <- network::as.network(unique(dplyr::filter(net_list[[1]], Module1!=Module2,Edge_Count!=0,!is.na(Edge_Count))),multiple=FALSE)
-        net_out <- ggnetwork(net_out, layout = net_layout, arrow.gap=0.03)
-
-        for(i in 2:length(net_list)){  sub <- net_list[[i]]; alt <- net_list[[1]]
-
-            int <- left_join(dplyr::select(sub,Module1,Module2,Edge_Count,Edge_Color, Module_Node_Count, Area),dplyr::select(alt, Module1,Module2, Edge_ID),by=c("Module1","Module2"))
-
-            int2 <- dplyr::filter(net_out, Edge_ID %in% int$Edge_ID)
-
-            int2 <- merge(dplyr::select(int2,-Edge_Count),dplyr::select(int,Edge_ID,Edge_Count), by="Edge_ID")
-
-
-            int2$Edge_Color <- unique(sub$Edge_Color)
-            net_out <- rbind(net_out, int2) }
-
-        net_out <- dplyr::filter(net_out, !is.na(Edge_Count))
-
-    } else{
-        print("Working other")
-    net_out <- network::as.network(unique(dplyr::filter(hybrid_net_summary, Module1!=Module2,Edge_Count!=0,!is.na(Edge_Count))),multiple=FALSE)
-    net_out <- ggnetwork(net_out, layout = net_layout, arrow.gap=0.03)
-
-    net_out <- dplyr::filter(net_out, !is.na(Edge_Count))
-##
-    }
-    saveRDS(net_out,"net_out.rds")
-
-    black <- unique(dplyr::filter(net_out, Edge_Color=="black"))
-    red <- unique(dplyr::filter(net_out, Edge_Color=="red"))
-    green <- unique(dplyr::filter(net_out, Edge_Color=="green"))
-
-    ggplot(net_out, aes(x = x, y = y, xend = xend, yend = yend)) +
-        geom_edges(data=black,aes(alpha=Edge_Weight,lwd=Edge_Count),color=black$Edge_Color,curvature=0.1,angle=10,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25)) +
-        geom_edges(data=green,aes(lwd=50*Edge_Count),color="green",curvature=0.4,angle=90,lty=4,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25),show.legend=F) +
-        geom_edges(data=red,aes(lwd=50*Edge_Count),color="red",curvature=0.7,angle=90,lty=2,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25),show.legend=F) +
-        geom_nodes(aes(color=vertex.names,size=Area),alpha=0.8,show.legend=F) +
-        geom_nodes(aes(size=Area*2,color=vertex.names),alpha=0.3,show.legend=F)+
-        theme_void()+
-        geom_nodelabel(aes(label=gsub("Module_","",vertex.names),size=0.1*Area),show.legend=F,fontface=2,color="gray50",label.padding=unit(0.1,"lines"))+
-        scale_linewidth_binned(range=c(0.001,3),n.breaks=6)+
-        scale_alpha_binned(range=c(0.05,0.7),n.breaks=5)+
-        scale_size_area("Module_Node_Count", n.breaks = 10,max_size = 20)+
-        labs(title=title)+theme(plot.title=element_text(hjust=0.5))
 }
 
-network_colorscale <- function(color_list=NULL,extension=".txt",scales=c("fill","color"),...){
-    require(ggplot2)
-
-    if(length(scales)>1){ scales <- "color"}
-    if(is.null(color_list)==TRUE){
-        cols <- data.frame(c(0:94,paste0("ME",0:94),paste0("Module_",0:94)),c("grey","turquoise","blue","brown","yellow","green","red","black","pink","magenta","purple","greenyellow","tan","salmon","cyan","midnightblue","lightcyan","grey60","lightgreen","lightyellow","royalblue","darkred","darkgreen","darkturquoise","darkgrey","orange","darkorange","white","skyblue","saddlebrown","steelblue","paleturquoise","violet","darkolivegreen","darkmagenta","sienna3","yellowgreen","skyblue3","plum1","orangered4","mediumpurple3","lightsteelblue1","lightcyan1","ivory","floralwhite","darkorange2","brown4","bisque4","darkslateblue","plum2","thistle2","thistle1","salmon4","palevioletred3","navajowhite2","maroon","lightpink4","lavenderblush3","honeydew1","darkseagreen4","coral1","antiquewhite4","coral2","mediumorchid","skyblue2","yellow4","skyblue1","plum","orangered3","mediumpurple2","lightsteelblue","lightcoral","indianred4","firebrick4","darkolivegreen4","brown2","blue2","darkviolet","plum3","thistle3","thistle","salmon2","palevioletred2","navajowhite1","magenta4","lightpink3","lavenderblush2","honeydew","darkseagreen3","coral","antiquewhite2","coral3","mediumpurple4","skyblue4","yellow3"))
-        colnames(cols) <- c("Module","Color")
-##        str(cols)
-
-
-
-
-    } else if(is.character(color_list) & !is.vector(color_list)) { if(extension == ".rds" & !is.data.frame(cols)) { print("reading RDS"); cols <- readRDS(color_list)} else if(extension==".txt" & !is.data.frame(cols)){ print("reading txt");cols <- read.table(color_list,sep='\t',stringsAsFactors=F,header=T,comment.char="$")}}
-
-        if(is.data.frame(cols)){ df <- cols; cols <- df[,2]; names(cols) <- df[,1]} else if(is.vector(color_list)==TRUE){ cols <- color_list}
-
-
-    g <- ggplot2:::manual_scale(scales, values=cols)
-    return(g)
-}
+    }
