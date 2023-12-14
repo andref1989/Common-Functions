@@ -10271,36 +10271,29 @@ new_prepare_hybrid_network <- function(net_name_variable, wgcna_net_rds,wgcna_be
 new_create_network_config <- function(BN_digraph,cm_file,TOM_file, wgcna_net_rds,gene_info,include_cm=TRUE,default_create_r="~/Pathos_Projects/p0069_hybrid_nets_workflow/code/example_config.R",out_create_r=NULL){
   
   if(!is.null(out_create_r)){
-    system(paste0("sed -i '' 's#BN_digraph#",mediation_file,"#g' ",out_create_r))
-    system(paste0("sed -i '' 's#CM_file#",cm_file,"#g' ",out_create_r))
-    system(paste0("sed -i '' 's#TOM_file#",TOM_file,"#g' ",out_create_r))
-    system(paste0("sed -i '' 's#WGCNA_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
-    system(paste0("sed -i '' 's/Gene_info/",gene_info,"/g' ",out_create_r))
+    system(paste0("cp ",default_create_r," ",out_create_r))
+    system(paste0("sed -i 's#BN_digraph#",BN_digraph,"#g' ",out_create_r))
+    system(paste0("sed -i 's#CM_file#",cm_file,"#g' ",out_create_r))
+    system(paste0("sed -i 's#TOM_file#",TOM_file,"#g' ",out_create_r))
+    system(paste0("sed -i 's#WGCNA_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
+    system(paste0("sed -i 's#Gene_info_file#",gene_info,"#g' ",out_create_r))
     
   } else{ print("No output path specified, stopping!"); stop()}
   
   if(include_cm==TRUE){
-    cm_out <- "TRUE"
-    system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} else{
-      cm_out <- "c(TRUE,FALSE,FALSE,FALSE)"
-      system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} }
+    cm_out <- TRUE
+    system(paste0("sed -i 's#include_cm#",cm_out,"#g' ",out_create_r))
+    system(paste0("sed -i'' -e 's#\"TRUE\"#TRUE#g' ",out_create_r))
+   
 
-freq_table_to_matrix <- function(df, row_name, column_name,value_name="Freq",default_fill=0){
-    df_mat <- matrix(default_fill, nrow=length(unique(df[,row_name])),ncol=length(unique(df[,column_name])))
-    rownames(df_mat) <- unique(df[,row_name])
-    colnames(df_mat) <- unique(df[,column_name])
-    index <- which(df[,value_name] !=default_fill)
-##    str(index)
-    for(n in index){
-        i=as.character(df[n,row_name])
-        j=df[n,column_name]
-        val=df[n,value_name]
-        df_mat[i,j] <- val
-    }
-    return(df_mat)
+  } else{
+      cm_out <- FALSE
+      system(paste0("sed -i 's#include_cm#",cm_out,"#g' ",out_create_r))
 
+      system(paste0("sed -i'' -e 's#\"FALSE\"#FALSE#g' ",out_create_r))
+      }
+ 
 }
-
 
 
 plot_heatmap_from_freq_table <- function(df,x_column="Cancer",y_column="Disease",title=NULL,cluster_method="HC",cluster_index=c("row","column","both"),fontsize=2,freq_cutoff=0.005,grouping_column=NULL,fill_values=FALSE){
