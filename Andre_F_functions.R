@@ -3955,30 +3955,55 @@ fishers_exact_vec <- function(vec,universe,label=NULL,alternative_opt=c("two.sid
     return(final)
 }
 
-project_onto_tsne <- function(tsne_out, df, margin=c("row","column"), index_df,rank=TRUE,shape=NULL, nudge=-0.5){
+project_onto_tsne <- function(tsne_out, df, sample_margin=c("row","column"), index_df,rank=TRUE,shape=NULL, nudge=-0.5,size=2,index_name=NULL,is_signature=NULL,collapse=c("mean","median",NULL)){
     require(ggplot2)
     require(ggrepel)
-#    str(tsne_out)
+##    str(tsne_out)
 
-    if(margin == "row"){
+    collapse <- collapse[1]
+    if(sample_margin=="column"){ df <- df} else if (sample_margin=="row"){ df <- as.data.frame(t(df))}
 
-        tsne_out[index_df] <- unlist(df[index_df,tsne_out$Sample])} else if (margin == "column"){ tsne_out[index_df] <- unlist(df[tsne_out$Sample,index_df])}
+    match_val <- match(tsne_out$Sample,colnames(df))
+    meta_df <- df[index_df,match_val]
 
-    tsne_out[index_df] <- round(tsne_out[index_df],2)
+    str(meta_df)
+    if(length(index_df) >1){
+        if(is_signature){
+            if(is.null(collapse)){
+                print("Haven't specified how to handle multiple genes, or whether this geneset is a signature. Terminating")
+                stop()
+            } else if (collapse=="mean"){
+                metadata <- colMeans(meta_df)
+            } else if( collapse=="median"){ metadata <- colMedians(meta_df)
+            } else { print("Don't know how to handle that particular method. Terminating")
+                stop()}
+        tsne_out$Signature <- metadata} else{
+            print("Haven't specified how to handle multiple genes, or whether this geneset is a signature. Terminating")
+        }
 
-#    str(tsne_out)
-                                        #    print(index_df)
+    } else if(length(index_df)==1){
+        metadata <- meta_df
+        tsne_out[,index_df] <- metadata
+    } else {
+        print("Fatal Error. Terminating")
+        stop()
+    }
+    
+
+    str(tsne_out)
+##                                            print(index_df)
     if(is.null(shape)== TRUE){
 
-        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df)),shape=21,color="gray50",size=6,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))
+        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df)),shape=21,color="gray50",size=size,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))
             ## geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get(index_df)))
     } else{
-        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df),shape=!!sym(shape)),color="gray50",size=6,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+scale_shape_manual(values=c(21:25))
+        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df),shape=!!sym(shape)),color="gray50",size=size,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+scale_shape_manual(values=c(21:25))
         ## +geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get(index_df)))
         }
 
-    if(rank==TRUE){ p <- p+scale_fill_gradient(low="red",high="green")} else if (rank==FALSE){
-        p <- p+scale_fill_gradient(low="green",high="red")}
+    index_name <- ifelse(is.null(index_name), index_df,index_name)
+    if(rank==TRUE){ p <- p+scale_fill_gradient(low="red",high="green",name=index_name)} else if (rank==FALSE){
+        p <- p+scale_fill_gradient(low="green",high="red",name=index_name)}
 
     return(p)}
 
@@ -6472,7 +6497,14 @@ rowMedians <- function(df,na.rm=TRUE){
     out <- apply(df,1,function(x) median(x, na.rm=na.rm))
     names(out) <- rownames(df)
     return(out)}
+        
+colMedians <- function(df,na.rm=TRUE){
 
+    out <- apply(df,2,function(x) median(x, na.rm=na.rm))
+    names(out) <- rownames(df)
+    return(out)}
+
+        
 make_fisher_df_key_TFs <- function(top50_list, TSNE_df, num_TFs=10,Achilles_df,group_column="Disease",TF_column="Signif_drivers"){
     TF_df <- unique(TSNE_df[c(group_column,TF_column)])
     TF_df_list <- lapply(TF_df[,2], function(x) unlist(strsplit(x,"-")))
@@ -10236,23 +10268,22 @@ new_prepare_hybrid_network <- function(net_name_variable, wgcna_net_rds,wgcna_be
 
     else{ print("No output path specified, stopping!"); stop()}}
 
-new_create_network <- function(net_name_variable, wgcna_net_rds,wgcna_beta_tom,cm_file,BN_digraph,include_cm=TRUE,default_create_r="/Users/forbesa/p0069_create_network.R",out_create_r=NULL){
-
-        if(!is.null(out_create_r)){
-        system(paste0("cp ", default_create_r," ",out_create_r))
-        system(paste0("sed -i '' 's/net_name_variable/",net_name_variable,"/g' ",out_create_r))
-        system(paste0("sed -i '' 's#wgcna_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#wgcna_beta_tom#",wgcna_beta_tom,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#cm_file#",cm_file,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#BN_digraph#",mediation_file,"#g' ",out_create_r))
-    } else{ print("No output path specified, stopping!"); stop()}
-
-    if(include_cm==TRUE){
-        cm_out <- "c(TRUE,TRUE,TRUE,TRUE)"
-        system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} else{
-                                                                                 cm_out <- "c(TRUE,FALSE,FALSE,FALSE)"
-                                                                                 system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} }
-
+new_create_network_config <- function(BN_digraph,cm_file,TOM_file, wgcna_net_rds,gene_info,include_cm=TRUE,default_create_r="~/Pathos_Projects/p0069_hybrid_nets_workflow/code/example_config.R",out_create_r=NULL){
+  
+  if(!is.null(out_create_r)){
+    system(paste0("sed -i '' 's#BN_digraph#",mediation_file,"#g' ",out_create_r))
+    system(paste0("sed -i '' 's#CM_file#",cm_file,"#g' ",out_create_r))
+    system(paste0("sed -i '' 's#TOM_file#",TOM_file,"#g' ",out_create_r))
+    system(paste0("sed -i '' 's#WGCNA_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
+    system(paste0("sed -i '' 's/Gene_info/",gene_info,"/g' ",out_create_r))
+    
+  } else{ print("No output path specified, stopping!"); stop()}
+  
+  if(include_cm==TRUE){
+    cm_out <- "TRUE"
+    system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} else{
+      cm_out <- "c(TRUE,FALSE,FALSE,FALSE)"
+      system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} }
 
 freq_table_to_matrix <- function(df, row_name, column_name,value_name="Freq",default_fill=0){
     df_mat <- matrix(default_fill, nrow=length(unique(df[,row_name])),ncol=length(unique(df[,column_name])))
