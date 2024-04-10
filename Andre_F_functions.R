@@ -136,8 +136,8 @@ Copy_Number_Eval <- function(CN_gr,interval_gr,expression_matrix,Gene){
     CNA_table$Subtype <- NA; for(i in rownames(CNA_table)){sample_subtype <- expression_matrix[i,"Status"];CNA_table[i,]$Subtype <- sample_subtype}
 return(CNA_table)}
 
-Cross_validation <- function(matrix,num_of_folds,featurelist,Gene){
-    fold_size <- round(dim(matrix)[1]/num_of_folds)
+Cross_validation <- function(matrix,num_of_folds,featurelist,Gene,verbose=FALSE){
+    fold_size <- floor(dim(matrix)[1]/num_of_folds)
     out_list <- list()
     blacklist <- c()
 
@@ -150,8 +150,10 @@ Cross_validation <- function(matrix,num_of_folds,featurelist,Gene){
         df_out <- data.frame(matrix[test,Gene],test_result)
         colnames(df_out) <- c("Actual","Prediction")
         df_out$Features <- paste0(featurelist,collapse=",")
+        df_out$Fold <- paste0("Fold",i)
+        df_out$sample <- test
         out_list <- append(out_list,list(df_out))
-        print(paste0("Finished Processing Fold ",i))
+       if(verbose) {print(paste0("Finished Processing Fold ",i))} 
     }
     return(out_list)}
 
@@ -162,7 +164,7 @@ Condense_cross_validation_output <- function(Cross_validation_output,feature_inf
     for(i in 1:length(Cross_validation_output)){
         sub <- Cross_validation_output[[i]]
         cor_val <- cor(sub[,1],sub[,2],use='complete.obs')^2
-        Fold <- paste0("Fold_",i)
+        Fold <- paste0("Fold",i)
 
         out_df <- data.frame(cor_val,Fold,unique(sub$Features))
         final_df <- rbind(final_df,out_df)
@@ -189,7 +191,6 @@ Plot_cross_validation_output <- function(Cross_validation_output,featurelist){
     final_df$Features <- paste0(featurelist,collapse="-")
     p <- ggplot(final_df,aes_string(x="Fold",y="R_Squared"))+geom_point()+geom_hline(yintercept=mean(final_df[,1]),size=2, alpha=0.5,color="coral", linetype=2)+labs(title=paste0("Model Performance in ",length(Cross_validation_output),"-fold cross-validation"),subtitle=final_df$Features)
     print(p)
-    dev.off()
 
 }
 
@@ -526,7 +527,7 @@ Group_cross_validation <- function(best_features_output,matrix,num_folds=10,Gene
     return(final_df)}
 
 
-glmnet_regression <- function(featurelist, matrix, Gene, family="gaussian",alpha){
+glmnet_regression <- function(featurelist, matrix, response_variable, family="gaussian",alpha){
     require(glmnet)
     featurelist_sub <- intersect(featurelist,colnames(matrix))
     check_len <- length(featurelist)-length(featurelist_sub)
@@ -534,7 +535,7 @@ glmnet_regression <- function(featurelist, matrix, Gene, family="gaussian",alpha
     featurelist <- featurelist_sub
     predictor <- as.matrix(matrix[,featurelist])
 
-    response <- matrix[,Gene]
+    response <- matrix[,response_variable]
 
     fit <- glmnet(x=predictor,y=response,family=family,alpha=alpha)
     return(fit)}
@@ -728,13 +729,13 @@ plot_case_study_redux <- function(matrix,Gene,Title,excluded_columns){
 
 
 
-multiple_regression <- function(matrix,feature_list,Gene){
+multiple_regression <- function(matrix,feature_list,response_variable){
     feature_list <- intersect(feature_list, colnames(matrix))
 
     formula_in <- paste0(feature_list,collapse="+")
-    str(formula_in)
-    final_formula <- paste0(Gene,"~",formula_in)
-    lm_out <- bglm(as.formula(final_formula), data=matrix,maxit=100)
+##    str(formula_in)
+    final_formula <- paste0(response_variable,"~",formula_in)
+    lm_out <- glm(as.formula(final_formula), data=matrix,maxit=100)
     return(lm_out)}
 
 make_conting_table_model_AUC <- function(model_AUC_output,num_steps=20){
@@ -1142,15 +1143,18 @@ run_tsne <- function(df,sample_margin="column",perplexity=NULL,...){
 get_metadata_tsne <- function(df, metadata_file,column=2,col_name="Subtype"){
     df[col_name] <- metadata_file[rownames(df),column]
     return(df)}
-get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutoff_quantile=0.95,opt_count=1,minPoints=3,eps=NULL,kmin_samples=3,keep_outliers=TRUE,outlier_method=c("Centroid","Agglomerative"),kmean_clusters=NULL){
+get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutoff_quantile=0.95,opt_count=1,minPoints=3,eps=NULL,kmin_samples=3,keep_outliers=TRUE,outlier_method=c("Centroid","Agglomerative"),kmean_clusters=NULL,is_tsne=TRUE){
     require(dplyr)
     sub_df <- tsne_df[,grep("Dim", colnames(tsne_df))]
 ##    str(sub_df)
     sub_df$Sample <- tsne_df$Sample
     in_df <- sub_df
 
+    if(is_tsne){ dims <- 1:2} else{ dims <- grep("Dim", colnames(tsne_df),value=T)}
+    
+
     if(method == "hclust"){
-    clusters_tsne <- hclust(dist(in_df[,c(1,2)]))
+    clusters_tsne <- hclust(dist(in_df[,dims]))
     members <- cutree(clusters_tsne, h=quantile(clusters_tsne$height,cutoff_quantile))
  ##   str(members)
 
@@ -1173,8 +1177,8 @@ get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutof
         optimal_k[[1]] <- ifelse(optimal_k[[1]]==1,3,optimal_k[[1]])
         print(optimal_k[[1]])
  ##       str(sub_df)
-        tsne_df$Cluster <- as.character(kmeans(sub_df[1:2],optimal_k[[1]])$cluster)} else{
-                                                                                       tsne_df$Cluster <- as.character(kmeans(sub_df[1:2],kmean_clusters)$cluster)}
+        tsne_df$Cluster <- as.character(kmeans(sub_df[dims],optimal_k[[1]])$cluster)} else{
+                                                                                       tsne_df$Cluster <- as.character(kmeans(sub_df[dims],kmean_clusters)$cluster)}
 
    ##     str(tsne_df)
         tsne_out <- tsne_df
@@ -1187,19 +1191,22 @@ get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutof
     if(is.null(opt_count)){
         if(is.null(eps)){
             opt_eps <- get_optimal_dbscan_eps(in_df,opt_count=1,min_samples=minPoints,kmin_samples=kmin_samples)} else{opt_eps <- eps}
-    } else if(!is.null(opt_count)) { if(is.null(eps)){ opt_eps <- get_optimal_dbscan_eps(in_df[1:2],opt_count=opt_count,min_samples=minPoints,kmin_samples=kmin_samples)} else { opt_eps <- eps}}
+    } else if(!is.null(opt_count)) { if(is.null(eps)){ opt_eps <- get_optimal_dbscan_eps(in_df[dims],opt_count=opt_count,min_samples=minPoints,kmin_samples=kmin_samples,is_tsne=is_tsne)} else { opt_eps <- eps}}
 
-    members <- dbscan(in_df[1:2],opt_eps,minPoints)$cluster
+    members <- dbscan(in_df[dims],opt_eps,minPoints)$cluster
     print(table(members))
-    if(any(members == 0)){ index <- which(members==0)
-                           print("Working on outliers")
+    if(any(members == 0)){
+        print("Working on outliers")
+        index <- which(members==0)
 
                            if(keep_outliers==TRUE){
                                print("Preserving outliers")
                                addition <- 1:length(index)
                            members[index] <- max(members)+addition
 
-                           tsne_df$Cluster <- members} else if (keep_outliers==FALSE){
+                               tsne_df$Cluster <- members} else if (keep_outliers==FALSE){
+
+                                                             ##### THIS WILL NOT WORK FOR HIGH DIMENSIONAL DATA#####
                                print("Merging outliers")
                                if(outlier_method=="Centroid"){
                                sub_tsne <- tsne_df
@@ -1210,20 +1217,23 @@ get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutof
 
                                sub_tsne_outlier <- dplyr::filter(sub_tsne, Cluster ==0)
                                sub_tsne_outlier$Cluster <- as.numeric(unlist(centroid_df[apply(sub_tsne_outlier,1, function(x) get_closest(x[1:2], centroid_df[2:3])),"Cluster"]))
-                               #str(sub_tsne_outlier)
+                                        #str(sub_tsne_outlier)
+                               str(sub_tsne_outlier)
+                               str(sub_tsne_real)
                                tsne_df <- rbind(sub_tsne_outlier,sub_tsne_real)
-                               tsne_df <- tsne_df[match(in_df$Sample,tsne_df$Sample),]
+                               tsne_df <- merge(in_df,tsne_df[c("Sample","Cluster")], by="Sample")
 ##                               str(tsne_df)
                                tryCatch( {rownames(tsne_df)= tsne_df$Sample} ,error=function(e) {rownames(tsne_df) =1:nrow(tsne_df)})
                            }} else if(outlier_method=="Agglomerative"){
-
+##### THIS WILL NOT WORK FOR HIGH DIMENSIONAL DATA#####
+                                #######################
                                sub_tsne <- tsne_df;
                                sub_tsne$Cluster <- members
                                sub_tsne_real <- dplyr::filter(sub_tsne, Cluster !=0)
 
                                sub_tsne_outlier <- dplyr::filter(sub_tsne, Cluster ==0)
                                print(paste0("Merging any samples within range ", eps))
-                               sub_tsne_outlier$Cluster <- dbscan(sub_tsne_outlier[1:2],opt_eps, minPts=2)$cluster
+                               sub_tsne_outlier$Cluster <- dbscan(sub_tsne_outlier[dims],opt_eps, minPts=2)$cluster
 
                                final_non_outlier <- dplyr::filter(sub_tsne_outlier, Cluster!=0)
                                final_non_outlier$Cluster <- final_non_outlier$Cluster+max(sub_tsne_real$Cluster)
@@ -1241,16 +1251,14 @@ get_clusters_tsne <- function(tsne_df,method=c("hclust","dbscan","kmeans"),cutof
                             } else { print(paste0("Outlier method:",outlier_method," not implemented. Options are Centroid/Agglomerative"))
                                 stop()
                             }
-                                                     }}
+                                                     }} else{ tsne_df$Cluster <- members
 
-
-##    str(tsne_df)
-     ## stop()
+}
 
     tsne_out <- tsne_df
 
         }
-    
+
     tsne_out$Cluster <- factor(tsne_out$Cluster,levels=sort(as.numeric(sort(unique(tsne_out$Cluster)))))
     print(paste0("Found ",length(unique(tsne_out$Cluster))," clusters"))
 
@@ -1264,8 +1272,10 @@ plot_tsne <- function(df,title,color="Subtype",label="Subtype",viz=c("basic","me
     require(ggrepel)
     require(dplyr)
 
+    df <- as.data.frame(df)
+    if(all(class(unlist(df[,color])) %in% c("factor","integer"))){ df[,color] <- as.character(df[,color])} 
     if(color != label){
-        if(is.null(shape)==TRUE){
+        if(is.null(shape)){
             centroid_df <- df %>% group_by(get(color),get(label)) %>% dplyr::select(Dim1,Dim2) %>% summarize_all(mean) %>% ungroup
             colnames(centroid_df)[1:2] <- c(color,label) } else {
                                                              ##centroid_df <- df %>% group_by(get(color),get(label),get(shape)) %>% dplyr::select(Dim1,Dim2) %>% summarize_all(mean) %>% ungroup
@@ -1276,10 +1286,12 @@ plot_tsne <- function(df,title,color="Subtype",label="Subtype",viz=c("basic","me
                                                          colnames(centroid_df)[1] <- label
                                                      }
     if(viz=="enhanced"){
-        p <- ggplot(df, aes(Dim1,Dim2, fill=!!sym(color),label=!!sym(label)))+geom_point(size=size, alpha=alpha,shape=21,color="gray50")+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=1))+geom_mark_rect(aes(label=!!sym(label),fill=!!sym(color)),show.legend=FALSE,label.buffer=unit(1,"mm"),expand=unit(3,"mm"),label.fontsize=10,con.type="straight")} else if(viz=="basic"){
-            p <- ggplot(df, aes(Dim1,Dim2, fill=!!sym(color),label=!!sym(label)))+geom_point(size=size,shape=21,color="gray50",stroke=0.1,alpha=alpha)+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=legend_col))+geom_text(fontface="bold",size=font_size,check_overlap=TRUE,show.legend=FALSE)} else if(viz=="medium"){
-                if(is.null(shape)){ p <- ggplot(df, aes(Dim1,Dim2,fill=!!sym(color)))+geom_point(size=size,alpha=alpha,shape=21, color="gray50")+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=legend_col))+geom_text_repel(data=centroid_df, aes(label=!!sym(label)), segment.size=0.2,fontface="bold",size=font_size,show.legend=FALSE)}
-                else if(!is.null(shape)){p <- ggplot(df, aes(Dim1,Dim2,label=!!sym(label),fill=!!sym(color)))+geom_point(aes(fill=!!sym(color),shape=!!sym(shape)),size=size,alpha=alpha,color="gray50")+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=FALSE,color=FALSE)+scale_shape_manual(values=c(21:25))+geom_text_repel(data=centroid_df, aes(label=!!sym(label),fill=!!sym(color)), segment.size=0.2,fontface="bold",size=font_size,show.legend=FALSE)
+        p <- ggplot(df, aes(Dim1,Dim2, fill=!!sym(color),label=!!sym(label)))+geom_point(size=size, alpha=alpha,shape=21,color="gray50")+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=legend_col,override.aes=list(shape=21)))+geom_mark_rect(aes(label=!!sym(label),fill=!!sym(color)),show.legend=FALSE,label.buffer=unit(1,"mm"),expand=unit(3,"mm"),label.fontsize=10,con.type="straight")} else if(viz=="basic"){
+            p <- ggplot(df, aes(Dim1,Dim2, fill=!!sym(color),label=!!sym(label)))+geom_point(size=size,shape=21,color="gray50",stroke=0.1,alpha=alpha)+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=legend_col,override.aes=list(shape=21)))+geom_text(fontface="bold",size=font_size,check_overlap=TRUE,show.legend=FALSE)} else if(viz=="medium"){
+                                                                                                                                                                                                                                                                                                                                                                                                                                                     if(is.null(shape)){ p <- ggplot(df, aes(Dim1,Dim2,fill=!!sym(color)))+geom_point(size=size,alpha=alpha,shape=21, color="gray50")+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(fill=guide_legend(ncol=legend_col))+geom_text_repel(data=centroid_df, aes(label=!!sym(label),color=!!sym(color)), bg.color="white", bg.r=0.05,segment.size=0.2,fontface="bold",size=font_size,show.legend=FALSE,nudge_y=0.04*(range(df$Dim2)[2]-range(df$Dim2)[1]))
+                                                                                                                                                                                                                                                                                                                                                                                                                                                         }
+                else if(!is.null(shape)){p <- ggplot(df, aes(Dim1,Dim2,label=!!sym(label),fill=!!sym(color)))+geom_point(aes(fill=!!sym(color),shape=!!sym(shape)),size=size,alpha=alpha,color="gray50")+theme_classic()+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+labs(title=title)+guides(color=FALSE,fill=guide_legend(ncol=legend_col,override.aes=list(shape=21)))+scale_shape_manual(values=c(21:25,12:14))+geom_text_repel(data=centroid_df, aes(label=!!sym(label),color=!!sym(color)), segment.size=0.2,fontface="bold",size=font_size,show.legend=FALSE,nudge_y=0.04*(range(df$Dim2)[2]-range(df$Dim2)[1]))
+
 
                     ###+geom_text_repel(data=centroid_df, aes_string(label=label), segment.size=0.2,fontface="bold",size=font_size,show.legend=FALSE)
                 }
@@ -1891,30 +1903,31 @@ get_non_zero <- function(mat,margin="row"){
 
 }
 
-get_most_variable <- function(mat, margin=c('row','column'),cutoff=0,quantile=NULL){
+get_most_variable <- function(mat, margin=c('row','column'),val_cutoff=NULL,quantile=NULL){
     if(any(is.na(mat)) == TRUE){
         mat[is.na(mat)] <- 0
         print("There are NA values in the matrix. Working anyway")}
 
     else{ print("Working")}
 
-    if(is.null(quantile)){
-        cutoff=0 }
-    else{ cutoff = quantile}
+
+    if(is.null(quantile) & !is.null(val_cutoff)){
+        cutoff= val_cutoff
+    } else if(is.null(quantile) & is.null(val_cutoff)) { cutoff = 0} else if(!is.null(quantile) & is.null(val_cutoff)){ cutoff = quantile
+                                                                   } else { print("Can't have an absolute val_cutoff *AND* quantile-based cutoff; setting to 0"); cutoff =0}
 
     print(cutoff)
     if( margin =="row"){
         vec <- apply(mat, 1, var)
         vec <- sort(vec,decreasing=TRUE)
-
-        variable <- which(vec > quantile(vec,cutoff,na.rm=TRUE))
-        
-
-        #out <- mat[variable,]
+  
     }
     else if( margin== "column"){
         vec <- apply(mat,2,var)
-        variable <- which(vec > quantile(vec,cutoff))}
+    }
+
+    if(!is.null(val_cutoff)){ variable <- which(vec >= cutoff)} else { variable <- which(vec > quantile(vec,cutoff,na.rm=TRUE))}
+
     return(variable)}
 
 sparse_mat_to_vector <- function(mat){
@@ -3206,12 +3219,13 @@ NKX_correction <- function(dir, extension=".rds"){
         graph_out <- graph_from_edgelist(as.matrix(el[,c(1,2)]))
         saveRDS(graph_out, paste0(dir,gsub(".txt",".rds",i)))}}
 
-get_optimal_dbscan_eps <- function(tsne_df,min_samples=3,opt_count=1,kmin_samples=3){
+get_optimal_dbscan_eps <- function(tsne_df,min_samples=3,opt_count=1,kmin_samples=3,is_tsne=TRUE){
     require(dbscan)
     require(splines)
     require(inflection)
     require(dplyr)
-    sub_df <- tsne_df[,grep("Dim", colnames(tsne_df))]
+    if(is_tsne){
+    sub_df <- tsne_df[,grep("Dim", colnames(tsne_df))]} else{ sub_df <- tsne_df}
     knn_df <- sort(kNNdist(sub_df,kmin_samples))
     knn_df <- data.frame(1:length(knn_df),knn_df)
 
@@ -3303,11 +3317,16 @@ get_optimal_dbscan_eps <- function(tsne_df,min_samples=3,opt_count=1,kmin_sample
     return(final_eps)}
 
 
-get_optimal_k_clusters <- function(tsne_df, min_k=2,max_k=40, method=c("kmeans","GMM","kmedoids","hclust")){
+get_optimal_k_clusters <- function(tsne_df, min_k=2,max_k=40, method=c("kmeans","GMM","kmedoids","hclust"),is_tsne=TRUE){
     require(cluster)
     require(mclust)
     max_k <- min(c(max_k,nrow(tsne_df)-1))
-    sub_df <- tsne_df[,grep("Dim", colnames(tsne_df))]
+
+    if(is_tsne){sub_df <- tsne_df[,grep("Dim", colnames(tsne_df))]} else{
+
+                                                                      sub_df <- tsne_df[which(apply(tsne_df,2,class) %in% c("numeric","integer"))]
+                                                                      sub_df <- t(sub_df)
+                                                                  }
 
     if(method=="kmeans"){
 
@@ -3322,11 +3341,11 @@ get_optimal_k_clusters <- function(tsne_df, min_k=2,max_k=40, method=c("kmeans",
 
         out_df <- rbind(out_df,cbind(i,mean(sil[,3]),wss))
     }
-#        str(out_df)
+##        str(out_df)
     colnames(out_df) <- c("Cluster_Count", "Sil_Size","WithinSS")
     diff <- 0; for(i in 2:nrow(out_df)){ ydiff <- out_df[i,3]-out_df[i-1,3]; xdiff <- out_df[i,1]-out_df[i-1,1]; diff <- c(diff, (ydiff/xdiff))}
         out_df$Elbow_optimization <- diff
-#        print(out_df)
+##        print(out_df)
         sil_opt <- out_df[order(-out_df$Sil_Size),1][1:5]
 #        str(out_df[sil_opt,])
 #        str(sil_opt)
@@ -3335,7 +3354,7 @@ get_optimal_k_clusters <- function(tsne_df, min_k=2,max_k=40, method=c("kmeans",
 #        print(out_df[order(-out_df$Elbow_optimization),][1:10,])
 #        print(out_df[order(-out_df$Sil_Size),][1:10,])
         optimal_k <- max(intersect(sil_opt,elbow_opt))
-#        str(optimal_k)
+##        str(optimal_k)
         if(is.finite(optimal_k) ==FALSE){ optimal_k <- sil_opt[1]
                                         #            print(paste0("No concordance between elbow and silhouette methods"))
                                       }
@@ -3829,7 +3848,7 @@ run_umap <- function(df,sample_margin="column",config=umap.defaults,seed=20,n_ne
                                    rownames(df) <- gsub("\\.","-",rownames(df))
                                }
     else if (sample_margin == "row") { df <- df}
-    config$random_state=seed
+    configrandom_state=seed
     config$n_neighbors=n_neighbors
     config$min_dist <- min_dist
     config$spread <- spread
@@ -3955,30 +3974,68 @@ fishers_exact_vec <- function(vec,universe,label=NULL,alternative_opt=c("two.sid
     return(final)
 }
 
-project_onto_tsne <- function(tsne_out, df, margin=c("row","column"), index_df,rank=TRUE,shape=NULL, nudge=-0.5){
+project_onto_tsne <- function(tsne_out, df, sample_margin=c("row","column"), index_df,rank=TRUE,shape=NULL, nudge=-0.5,size=2,index_name=NULL,is_signature=NULL,collapse=c("mean","median",NULL),sample_identifier="Sample"){
     require(ggplot2)
     require(ggrepel)
-#    str(tsne_out)
+##    str(tsne_out)
 
-    if(margin == "row"){
+    collapse <- collapse[1]
 
-        tsne_out[index_df] <- unlist(df[index_df,tsne_out$Sample])} else if (margin == "column"){ tsne_out[index_df] <- unlist(df[tsne_out$Sample,index_df])}
+    
+    if(sample_margin=="column"){ df <- df} else if (sample_margin=="row"){ df <- as.data.frame(t(df))}
 
-    tsne_out[index_df] <- round(tsne_out[index_df],2)
+    index_df <- intersect(index_df,rownames(df))
 
-#    str(tsne_out)
-                                        #    print(index_df)
-    if(is.null(shape)== TRUE){
 
-        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df)),shape=21,color="gray50",size=6,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))
-            ## geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get(index_df)))
-    } else{
-        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym(index_df),shape=!!sym(shape)),color="gray50",size=6,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+scale_shape_manual(values=c(21:25))
-        ## +geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get(index_df)))
+    match_val <- match(tsne_out[,sample_identifier],colnames(df))
+
+    meta_df <- df[index_df,match_val]
+
+    if(length(index_df) >1){
+        if(is_signature){
+            if(is.null(collapse)){
+                print("Haven't specified how to handle multiple genes, or whether this geneset is a signature. Terminating")
+                stop()
+            } else if (collapse=="mean"){
+                metadata <- colMeans(meta_df)
+
+            } else if( collapse=="median"){
+                metadata <- colMedians(meta_df)
+
+            } else { print("Don't know how to handle that particular method. Terminating")
+                stop()}
+            tsne_out$Signature <- metadata
+            index_df <- "Signature"
+
+        } else{
+            print("Haven't specified how to handle multiple genes, or whether this geneset is a signature. Terminating")
         }
 
-    if(rank==TRUE){ p <- p+scale_fill_gradient(low="red",high="green")} else if (rank==FALSE){
-        p <- p+scale_fill_gradient(low="green",high="red")}
+    } else if(length(index_df)==1 && index_df!="Signature"){
+
+        metadata <- meta_df
+
+        tsne_out[,"Expression"] <- unlist(metadata)
+
+    } else {
+        print("Fatal Error. Terminating")
+        stop()
+    }
+
+
+
+    if(is.null(shape)== TRUE){
+
+        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym("Expression")),shape=21,color="gray50",size=size,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))
+            ## geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get("Expression")))
+    } else{
+        p <- ggplot(tsne_out, aes(Dim1,Dim2))+theme_bw()+geom_point(aes(fill=!!sym("Expression"),shape=!!sym(shape)),color="gray50",size=size,show.legend=T)+theme(axis.text.x=element_text(face='bold',size=15),axis.text.y=element_text(face='bold',size=15))+scale_shape_manual(values=c(21:25))
+        ## +geom_text_repel(fontface="bold",nudge_y=nudge,size=3.5, aes(color=get("Expression")))
+        }
+
+    index_name <- ifelse(is.null(index_name), "Expression",index_name)
+    if(rank==TRUE){ p <- p+scale_fill_gradient(low="red",high="green",name=index_name)} else if (rank==FALSE){
+        p <- p+scale_fill_gradient(low="green",high="red",name=index_name)}
 
     return(p)}
 
@@ -5535,27 +5592,34 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
     require(lsa)
     require(dplyr)
 
-    tsne_df <- dplyr::filter(tsne_df, get(cluster_column) !="")
-    predicted_template_df <- data.frame(stringsAsFactors=F)
 
 
-    template_df <- unique(tsne_df[unique(c(cluster_column))])
+    if(!is.null(reference_df)){tsne_df <- dplyr::filter(tsne_df, get(cluster_column) !="")
 
-    template_df <- apply(template_df,2, as.character)
+        predicted_template_df <- data.frame(stringsAsFactors=F)
+        template_df <- unique(tsne_df[unique(c(cluster_column))])
+        template_df <- apply(template_df,2, as.character)
+
+
+    } else{ print("Not using a reference")
+        predicted_template_df <- data.frame(stringsAsFactors=F)}
+    
 ##    gene_set <- unique(unlist(lapply(unique(tsne_df[,TF_column]), function(x) unlist(strsplit(x,"-")))))
     gene_set <- rownames(alt_df)
 
 
-    if(is.null(templates)==TRUE){
-    templates <- get_template_genes_v2(reference_df, tsne_df,cluster_column,quantile_cutoff=quantile_cutoff,method=method, template_length=template_length, is_ranked=is_ranked,value_returned="Templates",variable_length=variable_length, zscore_cutoff=zscore_cutoff)} else { templates <- lapply(templates, function(x) intersect(x, rownames(alt_df))) }
+    if(is.null(templates)){
+        templates <- get_template_genes_v2(reference_df, tsne_df,cluster_column,quantile_cutoff=quantile_cutoff,method=method, template_length=template_length, is_ranked=is_ranked,value_returned="Templates",variable_length=variable_length, zscore_cutoff=zscore_cutoff)
+    } else { templates <- lapply(templates, function(x) intersect(x, rownames(alt_df)))
+            str(templates)
+    }
 
     if(!is.null(reference_df)){
     if(!all(unique(unlist(templates)) %in% union(rownames(reference_df), rownames(alt_df)))){ print("There are template genes missing from the query dataframe. Dropping missing genes")
     templates <- lapply(templates, function(x) intersect(x, intersect(rownames(reference_df),rownames(alt_df))))} else{ templates <- templates}
-
     print("Finished templates")
 
-
+    str(templates)
 ###########
 
     samples <- lapply(sort(unique(template_df[,cluster_column])), function(x) dplyr::filter(tsne_df, get(cluster_column)==x)[,sample_col])
@@ -5579,7 +5643,7 @@ nearest_template_prediction_v3 <- function(reference_df,alt_df, tsne_df, cluster
                                                                                                                                       out_vec <- rep(0,length(vec)); names(out_vec) <- vec
                                                                                                                                       out_vec[index] <- 1
                                                                                                                                       sample_template_list[[i]] <- out_vec}
-                                                                                                                                  templates <- templates2 }
+                                                                                                                                  templates <- templates2}
 
     
 
@@ -5891,6 +5955,43 @@ print("Working Heatmaps")
     print("All Done")
 
 }
+
+plot_PRISM_corplot <- function(Achilles_df, gene_set, cor_method=c("pearson","spearman"),xlab=NULL,ylab=NULL,flip_axes=TRUE,title=NULL,signif_cutoff=0.05){
+    require(dplyr)
+    require(ggplot2)
+    if(length(cor_method)>1){ cor_method <- "spearman"}else{ cor_method <- cor_method}
+    if(is.null(title)){ title=paste0(unique(anno_df$Corr_Method)," correlation across samples")} else{ title=title}
+    
+    combinations <- lapply(1:length(gene_set)^2,function(x) unlist(expand.grid(gene_set, gene_set, stringsAsFactors=F)[x,]))
+
+    df<- do.call("rbind",lapply(combinations, function(x) data.frame(unlist(Achilles_df[x[1],]), unlist(Achilles_df[x[2],]), x[1],x[2],stringsAsFactors=FALSE,colnames(Achilles_df))))
+    colnames(df) <- c("Essentiality1","Essentiality2","Gene1","Gene2","Sample")
+    df <- df %>% group_by(Gene1,Gene2) %>% mutate(Corr=round(suppressWarnings(cor.test(Essentiality1,Essentiality2,method=cor_method))$estimate,digits=3), P_val=round(suppressWarnings(cor.test(Essentiality1,Essentiality2,method=cor_method))$p.value,digits=3)) %>% data.frame
+    df$Corr_Method <- cor_method
+
+    df$Corr_Method <- gsub("spearman","Spearman",df$Corr_Method)
+    df$Corr_Method <- gsub("pearson", "Pearson",df$Corr_Method)
+    df$Facet <- paste0(df$Gene1,"~",df$Gene2)
+    df$Signif <- df$P_val <= signif_cutoff
+    df$Flag <- df$Gene1 == df$Gene2
+    df <- dplyr::filter(df, Flag==FALSE)
+
+
+    anno_df <- unique(df[setdiff(colnames(df), c("Essentiality1","Essentiality2","Sample"))])
+
+    anno_df <- anno_df %>% mutate(Anno=paste0("Corr:",Corr,"\nP-value:",P_val))
+
+
+
+    p <- ggplot(df,aes(y=Essentiality1,x=Essentiality2,label=Sample))+geom_text(fontface="bold", size=0.3)+geom_point(aes(fill=Signif),shape=21,size=2,show.legend=F,alpha=0.4,color="gray50")+geom_smooth(method="lm",color="gray50",show.legend=F)+xlab(xlab)+ylab(ylab)+theme_bw()+theme(axis.text.x=element_text(face='bold',size=10),axis.text.y=element_text(face='bold',size=10),strip.background=element_rect(color="black",fill="gray"),strip.text = element_text(colour = "black", face = "bold",size=8))+facet_grid(Gene1~Gene2)+geom_text(data=anno_df, aes(x=-Inf,y=-Inf,vjust=-1,hjust=-1,label=Anno,alpha=1),size=3,fontface="bold",show.legend=F,color="gray25")+scale_fill_manual(values=c("black","red","white"))+labs(title=title)
+
+    if(flip_axes){p <- p+scale_x_reverse()+scale_y_reverse()} else{ p <- p}
+
+
+    return(p)
+
+}
+
 
 make_coessential_corplot <- function(Achilles_df, gene_set, cor_method=c("pearson","spearman")){
     require(dplyr)
@@ -6472,7 +6573,14 @@ rowMedians <- function(df,na.rm=TRUE){
     out <- apply(df,1,function(x) median(x, na.rm=na.rm))
     names(out) <- rownames(df)
     return(out)}
+        
+colMedians <- function(df,na.rm=TRUE){
 
+    out <- apply(df,2,function(x) median(x, na.rm=na.rm))
+    names(out) <- rownames(df)
+    return(out)}
+
+        
 make_fisher_df_key_TFs <- function(top50_list, TSNE_df, num_TFs=10,Achilles_df,group_column="Disease",TF_column="Signif_drivers"){
     TF_df <- unique(TSNE_df[c(group_column,TF_column)])
     TF_df_list <- lapply(TF_df[,2], function(x) unlist(strsplit(x,"-")))
@@ -7321,8 +7429,8 @@ plot_NTP_heatmaps <- function(NTP_output,metadata_df,column="Disease",pals="Grey
     j_blacklist <- c()
     indices <- c()
     for(i in 1:nrow(df_mat)){
-        best <- sort(df_mat[i,],sort_order=TRUE)
-        best_available <- best[setdiff(names(bests),j_blacklist)]
+        best <- sort(df_mat[i,],decreasing=TRUE)
+        best_available <- best[setdiff(names(best),j_blacklist)]
         if(best_available[1] >=0.2) {j_blacklist <- c(j_blacklist,names(best_available[1])); indices <- c(indices,rownames(df_mat)[i])} else{ j_blacklist <- j_blacklist; indices <- indices}
         
             
@@ -7333,7 +7441,7 @@ plot_NTP_heatmaps <- function(NTP_output,metadata_df,column="Disease",pals="Grey
 ##    print(indices)
     for(i in setdiff(unique(df$Cancer),j_blacklist)){
 ##        print(i)
-        best <- sort(df_mat[,i],sort_order=TRUE)
+        best <- sort(df_mat[,i],decreasing=TRUE)
 ##        #print(best)
         if(best[1] !=0){ insert_loc <- grep(names(best)[1], indices)
                          str(insert_loc)
@@ -10236,40 +10344,32 @@ new_prepare_hybrid_network <- function(net_name_variable, wgcna_net_rds,wgcna_be
 
     else{ print("No output path specified, stopping!"); stop()}}
 
-new_create_network <- function(net_name_variable, wgcna_net_rds,wgcna_beta_tom,cm_file,BN_digraph,include_cm=TRUE,default_create_r="/Users/forbesa/p0069_create_network.R",out_create_r=NULL){
+new_create_network_config <- function(BN_digraph,cm_file,TOM_file, wgcna_net_rds,gene_info,include_cm=TRUE,default_create_r="~/Pathos_Projects/p0069_hybrid_nets_workflow/code/example_config.R",out_create_r=NULL){
+  
+  if(!is.null(out_create_r)){
+    system(paste0("cp ",default_create_r," ",out_create_r))
+    system(paste0("sed -i 's#BN_digraph#",BN_digraph,"#g' ",out_create_r))
+    system(paste0("sed -i 's#CM_file#",cm_file,"#g' ",out_create_r))
+    system(paste0("sed -i 's#TOM_file#",TOM_file,"#g' ",out_create_r))
+    system(paste0("sed -i 's#WGCNA_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
+    system(paste0("sed -i 's#Gene_info_file#",gene_info,"#g' ",out_create_r))
+    
+  } else{ print("No output path specified, stopping!"); stop()}
+  
+  if(include_cm==TRUE){
+    cm_out <- TRUE
+    system(paste0("sed -i 's#include_cm#",cm_out,"#g' ",out_create_r))
+    system(paste0("sed -i'' -e 's#\"TRUE\"#TRUE#g' ",out_create_r))
+   
 
-        if(!is.null(out_create_r)){
-        system(paste0("cp ", default_create_r," ",out_create_r))
-        system(paste0("sed -i '' 's/net_name_variable/",net_name_variable,"/g' ",out_create_r))
-        system(paste0("sed -i '' 's#wgcna_net_rds#",wgcna_net_rds,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#wgcna_beta_tom#",wgcna_beta_tom,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#cm_file#",cm_file,"#g' ",out_create_r))
-        system(paste0("sed -i '' 's#BN_digraph#",mediation_file,"#g' ",out_create_r))
-    } else{ print("No output path specified, stopping!"); stop()}
+  } else{
+      cm_out <- FALSE
+      system(paste0("sed -i 's#include_cm#",cm_out,"#g' ",out_create_r))
 
-    if(include_cm==TRUE){
-        cm_out <- "c(TRUE,TRUE,TRUE,TRUE)"
-        system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} else{
-                                                                                 cm_out <- "c(TRUE,FALSE,FALSE,FALSE)"
-                                                                                 system(paste0("sed -i '' 's#include_cm#",cm_out,"#g' ",out_create_r))} }
-
-
-freq_table_to_matrix <- function(df, row_name, column_name,value_name="Freq",default_fill=0){
-    df_mat <- matrix(default_fill, nrow=length(unique(df[,row_name])),ncol=length(unique(df[,column_name])))
-    rownames(df_mat) <- unique(df[,row_name])
-    colnames(df_mat) <- unique(df[,column_name])
-    index <- which(df[,value_name] !=default_fill)
-##    str(index)
-    for(n in index){
-        i=as.character(df[n,row_name])
-        j=df[n,column_name]
-        val=df[n,value_name]
-        df_mat[i,j] <- val
-    }
-    return(df_mat)
-
+      system(paste0("sed -i'' -e 's#\"FALSE\"#FALSE#g' ",out_create_r))
+      }
+ 
 }
-
 
 
 plot_heatmap_from_freq_table <- function(df,x_column="Cancer",y_column="Disease",title=NULL,cluster_method="HC",cluster_index=c("row","column","both"),fontsize=2,freq_cutoff=0.005,grouping_column=NULL,fill_values=FALSE){
@@ -10278,18 +10378,20 @@ plot_heatmap_from_freq_table <- function(df,x_column="Cancer",y_column="Disease"
     require(ggplot2)
     require(ComplexHeatmap)
     require(seriation)
-    source("~/Andre_F_functions.R")
+    source("~/Andre_F_functions_git/Andre_F_functions.R")
+
 
 
     if(!is.null(freq_cutoff)){
         df <- dplyr::filter(df, Freq >=max(Freq)*freq_cutoff)}
     if(is.null(grouping_column)){
-    df <- df %>% group_by(get(y_column)) %>% mutate(Freq_Norm=Freq/sum(Freq)) %>% data.frame} else if (grouping_column %in% colnames(df)) {df <- df %>% group_by(get(grouping_column)) %>% mutate(Freq_Norm=Freq/sum(Freq)) %>% data.frame} else{ print("Grouping column not in provided dataframe: Stopping!"); stop()}
+    df <- df %>% group_by(get(y_column)) %>% mutate(Freq_Norm=round(Freq/sum(Freq),2)) %>% data.frame} else if (grouping_column %in% colnames(df)) {df <- df %>% group_by(get(grouping_column)) %>% mutate(Freq_Norm=round(Freq/sum(Freq),2)) %>% data.frame} else{ print("Grouping column not in provided dataframe: Stopping!"); stop()}
     ##    missing_preds <- setdiff(metadata_df[,y_column],unique(df[,y_column]))
 
 
     df[,1:2] <- apply(df[,1:2],2,as.character)
     df_mat <- freq_table_to_matrix(df,x_column,y_column,"Freq_Norm")
+    df_mat2 <- freq_table_to_matrix(df,x_column,y_column,"Freq")
 ##    str(df_mat)
 ##    print(df_mat[1:5,1:5])
 
@@ -10312,14 +10414,15 @@ plot_heatmap_from_freq_table <- function(df,x_column="Cancer",y_column="Disease"
         mat_index <- seriate(dist(df_mat), method=cluster_method)
         if(fill_values ==FALSE){
             p <- Heatmap(df_mat, name="Fraction", column_title=title, row_order=get_order(mat_index,1),cluster_columns = F,row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5))} else if(fill_values==TRUE){
-                                                  print("placeholder")}} else if(cluster_index=="column"){ if (fill_values==FALSE){ mat_index <- seriate(dist(t(df_mat)), method=cluster_method)
-                                                                                                                                                                                                                                                                                                                                                                                      p <- Heatmap(df_mat, name="Fraction", column_title=title,cluster_rows = F, column_order=get_order(mat_index,1),row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5)) } else if(fill_values==TRUE){ print("placeholder")  }} else if(cluster_index=="both"){
+                                                  p <- Heatmap(df_mat, name="Fraction", column_title=title, row_order=get_order(mat_index,1),cluster_columns = F,row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5),cell_fun=function(j, i, x, y, w, h, col) {grid.text(df_mat2[i,j],x,y,gp=gpar(fontsize=15,col="gray15",font=2))})}} else if(cluster_index=="column"){ if (fill_values==FALSE){ mat_index <- seriate(dist(t(df_mat)), method=cluster_method)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            p <- Heatmap(df_mat, name="Fraction", column_title=title,cluster_rows = F, column_order=get_order(mat_index,1),row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5)) } else if(fill_values==TRUE){
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    p <- Heatmap(df_mat, name="Fraction", column_title=title, cluster_rows=F,column_order=get_order(mat_index,1),row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5),cell_fun=function(j, i, x, y, w, h, col) {grid.text(df_mat2[i,j],x,y,gp=gpar(fontsize=15,col="gray15",font=2))})  }} else if(cluster_index=="both"){
                                                                      mat_index1 <- seriate(dist(df_mat), method=cluster_method)
                                                                      mat_index2 <- seriate(dist(t(df_mat)), method=cluster_method)
                                                                      if(fill_values==FALSE){
                                                                                                                                                                                                               p <- Heatmap(df_mat, name="Fraction", column_title=title, row_order=get_order(mat_index1,1), column_order=get_order(mat_index2,1),row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5))
 
-} else if( fill_values==TRUE){print("placeholder") }}
+} else if( fill_values==TRUE){p <- Heatmap(df_mat, name="Fraction", column_title=title, row_order=get_order(mat_index1,1),column_order=get_order(mat_index2,1),row_names_gp = gpar(font = 2,fontsize=fontsize),column_names_gp = gpar(font = 2,fontsize=12),top_annotation = col_anno, left_annotation=row_anno,rect_gp=gpar(col="white", lwd=0.5),cell_fun=function(j, i, x, y, w, h, col) {grid.text(df_mat2[i,j],x,y,gp=gpar(fontsize=15,col="gray15",font=2))}) }}
     return(p)}
 
 reset_ess_fonts <- function(){
@@ -10416,6 +10519,7 @@ parse_SNV_mutations <- function(df,tempus_data,table_name="g_molecular_master_fi
 
     if(!is.null(patient_subset)){ sub_mut <- dplyr::filter(sub_mut,patient_id %in% patient_subset)}
 
+
 mut_mat <- as.data.frame(t(data.frame(rep("0", length(genes_of_interest)))))
 rownames(mut_mat) <- "Empty"; colnames(mut_mat) <- genes_of_interest
 
@@ -10436,6 +10540,7 @@ for(i in unique(sub_mut$patient_id)){
     mut_mat <- mut_mat[-1,]
 
     df <- dplyr::filter(df,get(patient_identifier) %in% patient_subset)
+
     df <- merge(df,mut_mat,by.x=patient_identifier,by.y="patient_id",all.x=T)
 
     }
@@ -10564,11 +10669,11 @@ concatenate_vcfs <- function(input,sample_ID=NULL,verbose=F){
   return(out)
 }
 
-make_gmt_file <- function(genelist, outfile){
+make_gmt_file <- function(genelist, outfile,verbose=F){
   if(class(genelist)=="list" && !is.null(names(genelist))){
     gmt <- unlist(lapply(names(genelist), function(x) paste0(x,"\t",paste0(genelist[[x]],collapse="\t"))))
     writeLines(gmt,outfile)
-    print("Finished")
+    if(verbose){print("Finished")}
   } else{print("The provided genelist is not a *named* list object"); stop()}
 }
 
@@ -10906,144 +11011,232 @@ plot_sankey <- function(regimen_table,treatment_lines=5, num_drug_classes=6,num_
 
     }
 
-
-plot_hybrid_network_modules <- function(hybrid_net,title=NULL,module1="ensembl_id_1_module",module2="ensembl_id_2_module",drop_low_freq=FALSE,drop0=FALSE,highlight_gene=NULL,highlight_module=NULL,net_layout="seham"){
-    require(igraph)
-    require(ggnetwork)
-    require(tidyr)
-    require(ggplot2)
-    require(tempusr)
-    require(scales)
+plot_hybrid_network_modules <- function(hybrid_net, title = NULL, module1 = "ensembl_id_1_module", module2 = "ensembl_id_2_module", drop_low_freq = FALSE, drop0 = FALSE, highlight_gene = NULL, highlight_module = NULL, net_layout = "seham", out_edge_col = "red", in_edge_col = "green") {
 
 
+##################################################################################################################################
+### Transform hybrid network so that undirected edges are converted to bidirectional edges for the sake of visualization##########
+##################################################################################################################################
+  sub <- dplyr::filter(hybrid_net, .data$directed == TRUE)
+  int <- dplyr::filter(hybrid_net, .data$directed == FALSE)
+  sub2 <- int
+  genelist1 <- int$ensembl_id_1
+  genelist2 <- int$ensembl_id_2
+  int$ensembl_id_1 <- genelist2
+  int$ensembl_id_2 <- genelist1
+  sub2 <- rbind(sub2, int)
+  hybrid_net <- rbind(sub, sub2)
 
-### Transform hybrid network so that undirected edges are converted to bidirectional edges for the sake of visualization
-    sub <- dplyr::filter(hybrid_net, directed==TRUE)
-    int <- dplyr::filter(hybrid_net, directed==FALSE)
-    sub2 <- int
-    genelist1 <- int$ensembl_id_1
-    genelist2 <- int$ensembl_id_2
-    int$ensembl_id_1 <- genelist2
-    int$ensembl_id_2 <- genelist1
-    sub2 <- rbind(sub2, int)
-    hybrid_net <- rbind(sub,sub2)
+  ### Get HGNC symbols
+  gene_df <- tempusr::gene_annotation
+  rownames(gene_df) <- gene_df[, 1]
 
-### Get HGNC symbols
-    gene_df <- tempusr::gene_annotation; rownames(gene_df) <- gene_df[,1]
-
-    hybrid_net$Gene1 <- gene_df[hybrid_net[,"ensembl_id_1"],"hgnc_symbol"]
-    hybrid_net$Gene2 <- gene_df[hybrid_net[,"ensembl_id_2"],"hgnc_symbol"]
-
-
-### Remove genes in Module 0/Grey if requested
-    if(drop0){ hybrid_net <- dplyr::filter(hybrid_net, ensembl_id_1_module!=0,ensembl_id_2_module!=0)} else{ print("Not removing Module 0/Gray module")}
-
-### highlight gene workflow
-
-        if(!is.null(highlight_gene) & is.null(highlight_module)){
-            print("Highlighting gene")
-            hybrid_net$Edge_Color <- "black"
-            if(all(grepl("ENSG[0-9]{11}",highlight_gene))){ gene_id_col <- c("ensembl_id_1","ensembl_id_2")} else{ gene_id_col <- c("Gene1","Gene2")}
-            print(gene_id_col)
-            index <- lapply(gene_id_col, function(x) which(hybrid_net[,x] %in% highlight_gene))
-
-            if(length(unlist(index)) ==0 & drop0 ){
-                print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
-            } else if(length(unlist(index))==0 & !drop0) {
-                print("Couldn't find your gene of interest in the network. Not highlighting any genes")} else{
-                                                                                                           hybrid_net$Edge_Color[index[[1]]] <- "red"
-                                                                                                           hybrid_net$Edge_Color[index[[2]]] <- "green"
-                                                                                                       }} else if (is.null(highlight_gene) & !is.null(highlight_module)){
-            print("Highlighting module")
-            hybrid_net$Edge_Color <- "black"
-
-            index <- lapply(c(module1,module2), function(x) which(hybrid_net[,x] %in% highlight_module))
-            if(length(unlist(index)) ==0 & drop0 ){
-                print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
-            } else if(length(unlist(index))==0 & !drop0) {
-                print("Couldn't find your gene of interest in the network. Not highlighting any genes")} else{
-                                                                                                           hybrid_net$Edge_Color[index[[1]]] <- "red"
-                                                                                                           hybrid_net$Edge_Color[index[[2]]] <- "green"}
-                                                                                                        } else{ print("Not highlighting anything")
-                                                                                                            hybrid_net$Edge_Color <- "black"}
-
-
-    hybrid_net_summary <- lapply(unique(hybrid_net$Edge_Color), function(x) as.data.frame(table(dplyr::filter(hybrid_net, Edge_Color==x)[c("ensembl_id_1_module","ensembl_id_2_module")])))
-    for(i in 1:length(hybrid_net_summary)){ hybrid_net_summary[[i]]$Edge_Color <- unique(hybrid_net$Edge_Color)[i]}
-    hybrid_net_summary <- do.call("rbind", hybrid_net_summary)
+  hybrid_net$Gene1 <- gene_df[hybrid_net[, "ensembl_id_1"], "hgnc_symbol"]
+  hybrid_net$Gene2 <- gene_df[hybrid_net[, "ensembl_id_2"], "hgnc_symbol"]
 
 
 
-    hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2],2, function(x) as.integer(as.character(x)))
-    hybrid_net_summary[,4] <- as.character(hybrid_net_summary[,4])
+  ### Remove genes in Module 0/Grey if requested
+  if (drop0) {
+    hybrid_net <- dplyr::filter(hybrid_net, .data$ensembl_id_1_module != 0, .data$ensembl_id_2_module != 0)
+  } else {
+    print("Not removing Module 0/Gray module")
+  }
 
-    colnames(hybrid_net_summary) <- c("Module1","Module2","Edge_Count","Edge_Color")
-
-    hybrid_count <- dplyr::select(hybrid_net, Module1=ensembl_id_1_module,Gene=ensembl_id_1) %>% unique %>% group_by(Module1) %>% dplyr::summarize(Module_Node_Count=n())
-    if(drop_low_freq){
-        cutoff_val <- sum(hybrid_count)*0.01
-        hybrid_net_summary <- dplyr::filter(hybrid_net_summary, Edge_Count>=cutoff_val)   }
-
-
-    hybrid_net_summary <- left_join(hybrid_net_summary, hybrid_count, by="Module1") %>% group_by(Module1) %>% mutate(Edge_Weight= Edge_Count/Module_Node_Count) %>% ungroup
-
-    hybrid_net_summary$Area <- rescale(hybrid_net_summary$Module_Node_Count,to =c(2,20))
-
-    hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2],2, function(x) as.character(x))
-
-
-    if(!is.null(highlight_gene)){
-
-        print("Working gene")
-
-        net_list <- lapply(unique(hybrid_net_summary$Edge_Color), function(x) dplyr::filter(hybrid_net_summary, Edge_Color==x))
-##        for(i in 1:length(net_list)){  sub <- net_list[[i]]; sub$Edge_ID <- 1:nrow(sub); net_list[[i]] <- sub}
-
-        net_list[[1]]$Edge_ID <- 1:nrow(net_list[[1]])
-        net_out <- network::as.network(unique(dplyr::filter(net_list[[1]], Module1!=Module2,Edge_Count!=0,!is.na(Edge_Count))),multiple=FALSE)
-        net_out <- ggnetwork(net_out, layout = net_layout, arrow.gap=0.03)
-
-        for(i in 2:length(net_list)){  sub <- net_list[[i]]; alt <- net_list[[1]]
-
-            int <- left_join(dplyr::select(sub,Module1,Module2,Edge_Count,Edge_Color, Module_Node_Count, Area),dplyr::select(alt, Module1,Module2, Edge_ID),by=c("Module1","Module2"))
-
-            int2 <- dplyr::filter(net_out, Edge_ID %in% int$Edge_ID)
-
-            int2 <- merge(dplyr::select(int2,-Edge_Count),dplyr::select(int,Edge_ID,Edge_Count), by="Edge_ID")
-
-
-            int2$Edge_Color <- unique(sub$Edge_Color)
-            net_out <- rbind(net_out, int2) }
-
-        net_out <- dplyr::filter(net_out, !is.na(Edge_Count))
-
-    } else{
-        print("Working other")
-    net_out <- network::as.network(unique(dplyr::filter(hybrid_net_summary, Module1!=Module2,Edge_Count!=0,!is.na(Edge_Count))),multiple=FALSE)
-    net_out <- ggnetwork(net_out, layout = net_layout, arrow.gap=0.03)
-
-    net_out <- dplyr::filter(net_out, !is.na(Edge_Count))
-##
+##################################################################################################################################
+### Find gene(s)/module(s) specified for highlighting in hybrid network. Will automatically check if it's ensembl ID or hgnc format. Does not allow for a mixture of the two. Will create edges colored by whether they are entering or exiting your gene(s)/module(s) of interest
+##################################################################################################################################
+  if (!is.null(highlight_gene) & is.null(highlight_module)) {
+    print("Highlighting gene")
+    hybrid_net$Edge_Color <- "black"
+    if (all(grepl("ENSG[0-9]{11}", highlight_gene))) {
+      gene_id_col <- c("ensembl_id_1", "ensembl_id_2")
+    } else {
+      gene_id_col <- c("Gene1", "Gene2")
     }
-    saveRDS(net_out,"net_out.rds")
+##    print(gene_id_col)
+    index <- lapply(gene_id_col, function(x) which(hybrid_net[, x] %in% highlight_gene))
 
-    black <- unique(dplyr::filter(net_out, Edge_Color=="black"))
-    red <- unique(dplyr::filter(net_out, Edge_Color=="red"))
-    green <- unique(dplyr::filter(net_out, Edge_Color=="green"))
+    if (length(unlist(index)) == 0 & drop0) {
+      print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
+    } else if (length(unlist(index)) == 0 & !drop0) {
+      print("Couldn't find your gene of interest in the network. Not highlighting any genes")
+    } else {
+      hybrid_net$Edge_Color[index[[1]]] <- out_edge_col
+      hybrid_net$Edge_Color[index[[2]]] <- in_edge_col
+    }
+  } else if (is.null(highlight_gene) & !is.null(highlight_module)) {
+    print("Highlighting module")
+    hybrid_net$Edge_Color <- "black"
 
-    ggplot(net_out, aes(x = x, y = y, xend = xend, yend = yend)) +
-        geom_edges(data=black,aes(alpha=Edge_Weight,lwd=Edge_Count),color=black$Edge_Color,curvature=0.1,angle=10,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25)) +
-        geom_edges(data=green,aes(lwd=50*Edge_Count),color="green",curvature=0.4,angle=90,lty=4,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25),show.legend=F) +
-        geom_edges(data=red,aes(lwd=50*Edge_Count),color="red",curvature=0.7,angle=90,lty=2,arrow=arrow(length=unit(4, "pt"), type = "closed",angle=25),show.legend=F) +
-        geom_nodes(aes(color=vertex.names,size=Area),alpha=0.8,show.legend=F) +
-        geom_nodes(aes(size=Area*2,color=vertex.names),alpha=0.3,show.legend=F)+
-        theme_void()+
-        geom_nodelabel(aes(label=gsub("Module_","",vertex.names),size=0.1*Area),show.legend=F,fontface=2,color="gray50",label.padding=unit(0.1,"lines"))+
-        scale_linewidth_binned(range=c(0.001,3),n.breaks=6)+
-        scale_alpha_binned(range=c(0.05,0.7),n.breaks=5)+
-        scale_size_area("Module_Node_Count", n.breaks = 10,max_size = 20)+
-        labs(title=title)+theme(plot.title=element_text(hjust=0.5))
+    index <- lapply(c(module1, module2), function(x) which(hybrid_net[, x] %in% highlight_module))
+    if (length(unlist(index)) == 0 & drop0) {
+      print("Couldn't find your gene of interest, may not be in network and/or assigned to Module 0. Not highlighting any genes")
+    } else if (length(unlist(index)) == 0 & !drop0) {
+      print("Couldn't find your gene of interest in the network. Not highlighting any genes")
+    } else {
+      hybrid_net$Edge_Color[index[[1]]] <- out_edge_col
+      hybrid_net$Edge_Color[index[[2]]] <- in_edge_col
+    }
+  } else {
+    print("Not highlighting anything")
+    hybrid_net$Edge_Color <- "black"
+  }
+
+
+
+  hybrid_net_summary <- lapply(unique(hybrid_net$Edge_Color), function(x) as.data.frame(table(dplyr::filter(hybrid_net, .data$Edge_Color == x)[c("ensembl_id_1_module", "ensembl_id_2_module")])))
+  for (i in 1:length(hybrid_net_summary)) {
+    hybrid_net_summary[[i]]$Edge_Color <- unique(hybrid_net$Edge_Color)[i]
+  }
+  hybrid_net_summary <- do.call("rbind", hybrid_net_summary)
+
+
+
+  hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2], 2, function(x) as.integer(as.character(x)))
+  hybrid_net_summary[, 4] <- as.character(hybrid_net_summary[, 4])
+
+  colnames(hybrid_net_summary) <- c("Module1", "Module2", "Edge_Count", "Edge_Color")
+
+  hybrid_count <- dplyr::select(hybrid_net, Module1 = .data$ensembl_id_1_module, Gene = .data$ensembl_id_1) %>%
+    unique() %>%
+    dplyr::group_by(.data$Module1) %>%
+      dplyr::summarize(Module_Node_Count = n())
+
+##################################################################################################################################
+###Drops low frequency connections between modules if requested. Should only be used if making a less "busy" figure with the caveat that it is not truly representative
+##################################################################################################################################
+
+  if (drop_low_freq) {
+    cutoff_val <- sum(hybrid_count) * 0.01
+    hybrid_net_summary <- dplyr::filter(hybrid_net_summary, .data$Edge_Count >= cutoff_val)
+  }
+
+##################################################################################################################################
+### Creates "final" network edgelist with all relevant fields. Calculates an edge weight that is currently based on module hyper-connectivity. WIP
+##################################################################################################################################
+  hybrid_net_summary <- dplyr::left_join(hybrid_net_summary, hybrid_count, by = "Module1") %>%
+    dplyr::group_by(.data$Module1) %>%
+    dplyr::mutate(Edge_Weight = .data$Edge_Count / .data$Module_Node_Count) %>% data.frame
+
+  hybrid_net_summary$Area <- scales::rescale(hybrid_net_summary$Module_Node_Count, to = c(2, 20))
+
+  hybrid_net_summary[1:2] <- apply(hybrid_net_summary[1:2], 2, function(x) as.character(x))
+
+
+  if (!is.null(highlight_gene)) {
+    print("Working gene")
+
+
+    print(table(hybrid_net_summary$Edge_Color))
+
+##################################################################################################################################
+###Work around for issues with ggnetwork supporting bipartite graphs. This allows us to plot multiple set of edges involving the same nodes with different values.
+##################################################################################################################################
+    net_list <- lapply(unique(hybrid_net_summary$Edge_Color), function(x) dplyr::filter(hybrid_net_summary, .data$Edge_Color == x))
+
+
+    net_list[[1]]$Edge_ID <- 1:nrow(net_list[[1]])
+
+    net_out <- network::as.network(unique(dplyr::filter(net_list[[1]], .data$Module1 != .data$Module2,.data$Edge_Count != 0, !is.na(.data$Edge_Count))), multiple = FALSE)
+    net_out <- ggnetwork::ggnetwork(net_out, layout = net_layout, arrow.gap = 0.0125)
+
+    for (i in 2:length(net_list)) {
+      sub <- net_list[[i]]
+      alt <- net_list[[1]]
+
+
+
+      int <- dplyr::left_join(dplyr::select(sub, .data$Module1, .data$Module2, .data$Edge_Count, .data$Edge_Color, .data$Module_Node_Count, .data$Area), dplyr::select(alt, .data$Module1, .data$Module2, .data$Edge_ID), by = c("Module1", "Module2"))
+
+
+      if(all(sub$Module1 ==sub$Module2)){ int2 <- int; print("All edges between highlighted gene(s) are within the module")} else{
+      int2 <- dplyr::filter(net_out, .data$Edge_ID %in% int$Edge_ID)
+
+
+      int2 <- merge(dplyr::select(int2, -.data$Edge_Count), dplyr::select(int, .data$Edge_ID, .data$Edge_Count), by = "Edge_ID",all.x=TRUE)
+
+
+
+      int2$Edge_Color <- unique(sub$Edge_Color)
+      net_out <- rbind(net_out, int2)
+
+
+    }
+
+    net_out <- dplyr::filter(net_out, !is.na(.data$Edge_Count))
+  }} else {
+    print("Working module")
+    net_out <- network::as.network(unique(dplyr::filter(hybrid_net_summary, .data$Module1 != .data$Module2, .data$Edge_Count != 0, !is.na(.data$Edge_Count))), multiple = FALSE)
+    net_out <- ggnetwork::ggnetwork(net_out, layout = net_layout, arrow.gap = 0.03)
+
+    net_out <- dplyr::filter(net_out, !is.na(.data$Edge_Count))
+  }
+
+
+
+    print("Finished highlighting genes/modules")
+##################################################################################################################################
+### Actually plotting the network ################################################################################################
+##################################################################################################################################
+
+    black <- unique(dplyr::filter(net_out, .data$Edge_Color == "black"))
+    red <- unique(dplyr::filter(net_out, .data$Edge_Color == out_edge_col))
+    green <- unique(dplyr::filter(net_out, .data$Edge_Color == in_edge_col))
+    str(red)
+    str(green)
+
+   p <- ggplot2::ggplot(net_out, aes(x = .data$x, y = .data$y, xend = .data$xend, yend = .data$yend)) +
+       ggnetwork::geom_edges(data = black, aes(alpha = .data$Edge_Weight, lwd = .data$Edge_Count), color = "black", curvature = 0.1, angle = 10, arrow = arrow(length = unit(4, "pt"), type = "closed", angle = 25)) +
+       theme_void() +
+    scale_linewidth_binned(range = c(0.001, 3), n.breaks = 6) +
+    scale_alpha_binned(range = c(0.05, 0.7), n.breaks = 5) +
+    scale_size_area("Module_Node_Count", n.breaks = 10, max_size = 20) +
+    labs(title = title) +
+       theme(plot.title = element_text(hjust = 0.5))+
+       ggnetwork::geom_nodes(aes(color = .data$vertex.names, size = .data$Area), alpha = 0.8, show.legend = F) +
+       ggnetwork::geom_nodes(aes(size = .data$Area * 2, color = .data$vertex.names), alpha = 0.3, show.legend = F)+
+           ggnetwork::geom_nodelabel(aes(label = gsub("Module_", "", .data$vertex.names), size = 0.1 * .data$Area), show.legend = F, fontface = 2, color = "gray50", label.padding = unit(0.1, "lines")) 
+    if(nrow(red) >=1){ print("red")
+        p <- p + ggnetwork::geom_edges(data = red, aes(lwd = 50 * .data$Edge_Count), color = out_edge_col, curvature = 0.2, angle = 90, arrow = arrow(length = unit(4, "pt"), type = "closed", angle = 25), show.legend = F)} else { p <- p  ; print("No red")}
+    if(nrow(green) >=1){ print("green")
+        p <- p + ggnetwork::geom_edges(data = green, aes(lwd = 50 * .data$Edge_Count), color = in_edge_col, curvature = 0.3, angle = 90, arrow = arrow(length = unit(4, "pt"), type = "closed", angle = 25), show.legend = F)} else { p <- p; print("No green")}
+    return(p)
 }
+
+network_colorscale <- function(color_list = NULL, extension = ".txt", scales = c("fill", "color"), ...) {
+
+
+  if (length(scales) > 1) {
+    scales <- "color"
+  }
+  if (is.null(color_list) == TRUE) {
+    cols <- data.frame(c(0:94, paste0("ME", 0:94), paste0("Module_", 0:94)), c("grey", "turquoise", "blue", "brown", "yellow", "green", "red", "black", "pink", "magenta", "purple", "greenyellow", "tan", "salmon", "cyan", "midnightblue", "lightcyan", "grey60", "lightgreen", "lightyellow", "royalblue", "darkred", "darkgreen", "darkturquoise", "darkgrey", "orange", "darkorange", "white", "skyblue", "saddlebrown", "steelblue", "paleturquoise", "violet", "darkolivegreen", "darkmagenta", "sienna3", "yellowgreen", "skyblue3", "plum1", "orangered4", "mediumpurple3", "lightsteelblue1", "lightcyan1", "ivory", "floralwhite", "darkorange2", "brown4", "bisque4", "darkslateblue", "plum2", "thistle2", "thistle1", "salmon4", "palevioletred3", "navajowhite2", "maroon", "lightpink4", "lavenderblush3", "honeydew1", "darkseagreen4", "coral1", "antiquewhite4", "coral2", "mediumorchid", "skyblue2", "yellow4", "skyblue1", "plum", "orangered3", "mediumpurple2", "lightsteelblue", "lightcoral", "indianred4", "firebrick4", "darkolivegreen4", "brown2", "blue2", "darkviolet", "plum3", "thistle3", "thistle", "salmon2", "palevioletred2", "navajowhite1", "magenta4", "lightpink3", "lavenderblush2", "honeydew", "darkseagreen3", "coral", "antiquewhite2", "coral3", "mediumpurple4", "skyblue4", "yellow3"))
+    colnames(cols) <- c("Module", "Color")
+    ##        str(cols)
+  } else if (is.character(color_list) & !is.vector(color_list)) {
+    if (extension == ".rds" & !is.data.frame(cols)) {
+      print("reading RDS")
+      cols <- readRDS(color_list)
+    } else if (extension == ".txt" & !is.data.frame(cols)) {
+      print("reading txt")
+      cols <- utils::read.table(color_list, sep = "\t", stringsAsFactors = F, header = T, comment.char = "$")
+    }
+  }
+
+  if (is.data.frame(cols)) {
+    df <- cols
+    cols <- df[, 2]
+    names(cols) <- df[, 1]
+  } else if (is.vector(color_list) == TRUE) {
+    cols <- color_list
+  }
+
+
+  g <- ggplot2:::manual_scale(scales, values = cols)
+  return(g)
+}
+
 
 network_colorscale <- function(color_list=NULL,extension=".txt",scales=c("fill","color"),...){
     require(ggplot2)
@@ -11065,3 +11258,267 @@ network_colorscale <- function(color_list=NULL,extension=".txt",scales=c("fill",
     g <- ggplot2:::manual_scale(scales, values=cols)
     return(g)
 }
+
+
+
+compare_hybrid_network_modules <- function(network1, network2,method=c("jaccard","chisquared"),highlight_gene=NULL,translate_ensembl=NULL){
+
+    require(tempusr)
+    require(dplyr)
+
+
+
+    network1 <- unique(rbind(dplyr::select(network1, Gene=ensembl_id_1,Module=ensembl_id_1_module),dplyr::select(network1, Gene=ensembl_id_2,Module=ensembl_id_2_module)))
+    network2 <- unique(rbind(dplyr::select(network2, Gene=ensembl_id_1,Module=ensembl_id_1_module),dplyr::select(network2, Gene=ensembl_id_2,Module=ensembl_id_2_module)))
+
+
+    out <- data.frame(stringsAsFactors = F)
+    for(i in 1:nrow(network1)){
+        gene <- network1[i,1]
+        module1 <- network1[i,2]
+        module2 <- unique(dplyr::filter(network2,Gene==gene)[,2])
+        if(length(module1) >0 && length(module2)>0){
+
+        vec1 <- dplyr::filter(network1,Module==module1)[,1]
+        vec2 <- dplyr::filter(network2,Module==module2)[,1]
+
+        if(method=="jaccard"){
+
+            similarity <- length(intersect(vec1,vec2))/length(union(vec1,vec2))
+            if(length(vec1)>length(vec2)){ smallest <- vec2; largest <- vec1} else{ smallest <- vec1; largest <- vec2}
+            nestedness <- length(intersect(smallest,largest))/length(smallest)
+
+            int <- data.frame(gene, module1,module2,similarity,nestedness)
+
+            colnames(int) <- c("Gene","Module1","Module2","Jaccard_Similarity","Nestedness")
+
+        } else if (method=="chisquared"){
+            TP <- length(intersect(vec1,vec2))
+            FP <- length(setdiff(vec1,vec2))
+            FN <- length(setdiff(vec1,x=vec2))
+            TN <- length(union(vec1,vec2))
+            mat <- matrix(c(TP,FP,FN,TN),nrow=2,ncol=2)
+            mat_result <- chisq.test(mat)
+            int <- data.frame(gene,module1,module2,mat_result$statistic,mat_result$p.value)
+            colnames(int) <- c("Gene","Module1","Module2","X-squared","P_value")
+
+
+
+        }
+            out <- rbind(out,int)}}
+    if(!is.null(translate_ensembl) &&  translate_ensembl==TRUE){
+            gene_df <- tempusr::gene_annotation
+            rownames(gene_df) <- gene_df[, 1]
+            out$Gene <- gene_df[out$Gene,"hgnc_symbol"]
+} else{ out <- out}
+
+    return(out)}
+
+
+
+compare_wgcn_modules <- function(gene_info1, gene_info2,method=c("jaccard","chisquared"),highlight_gene=NULL,translate_ensembl=NULL){
+
+    require(tempusr)
+    require(dplyr)
+    if(length(method>1)){ method <- "jaccard"}
+
+
+
+
+    network1 <- dplyr::select(gene_info1,Gene_ID=ensembl_gene_id,Module_Label=module_label,Gene=hgnc_symbol,Module_Color=module_color)
+    network2 <- dplyr::select(gene_info2,Gene_ID=ensembl_gene_id,Module_Label=module_label,Gene=hgnc_symbol,Module_Color=module_color)
+
+
+    out <- data.frame(stringsAsFactors = F)
+    for(i in sort(unique(network1$Module_Label))){
+
+        module1 <- i
+        vec1 <- dplyr::filter(network1,Module_Label==module1)$Gene_ID
+        int <- data.frame(stringsAsFactors = F)
+        for(j in sort(unique(network2$Module_Label))){
+            module2 =j
+            vec2 <- dplyr::filter(network2,Module_Label==module2)[,1]
+            if(method=="jaccard"){
+                similarity <- length(intersect(vec1,vec2))/length(union(vec1,vec2))
+                if(length(vec1)>length(vec2)){ smallest <- vec2; largest <- vec1} else{ smallest <- vec1; largest <- vec2}
+                nestedness <- length(intersect(smallest,largest))/length(smallest)
+                sub <- data.frame(module1,module2,similarity,nestedness,length(vec1), length(vec2),length(intersect(vec1,vec2)),length(union(vec1,vec2)))
+                int <- rbind(int,sub)
+            } else if (method=="chisquared"){
+
+                TP <- length(intersect(vec1,vec2))
+                FP <- length(setdiff(vec1,vec2))
+                FN <- length(setdiff(vec1,x=vec2))
+                TN <- length(union(vec1,vec2))
+                mat <- matrix(c(TP,FP,FN,TN),nrow=2,ncol=2)
+                mat_result <- chisq.test(mat)
+                sub <- data.frame(module1,module2,mat_result$statistic,mat_result$p.value)
+                int <- rbind(int,sub)
+                
+        }}
+            out <- rbind(out,int)}
+    if(!is.null(translate_ensembl) &&  translate_ensembl==TRUE){
+            gene_df <- tempusr::gene_annotation
+            rownames(gene_df) <- gene_df[, 1]
+            out$Gene <- gene_df[out$Gene,"hgnc_symbol"]
+} else{ out <- out}
+
+    if(method=="jaccard"){colnames(out) <- c("Module1","Module2","Jaccard_Similarity","Nestedness","Module1_Size","Module2_Size","Intersection","Union")
+        out <- out %>% group_by(Module1,Module2) %>% mutate(Dist_to_origin=dist(rbind(c(0,0,0),c(Jaccard_Similarity,Nestedness,Intersection)))) %>% ungroup %>% group_by(Module1) %>% mutate(Best_Match=Dist_to_origin==max(Dist_to_origin)) %>% data.frame
+    } else if(method=="chisquared"){colnames(out) <- c("Module1","Module2","X-squared","P_value")}
+            return(out)}
+
+expand_hybrid_network <- function(hybrid_net){
+    require(dplyr)
+  sub <- dplyr::filter(hybrid_net, .data$directed == TRUE)
+  int <- dplyr::filter(hybrid_net, .data$directed == FALSE)
+  sub2 <- int
+  genelist1 <- int$ensembl_id_1
+  genelist2 <- int$ensembl_id_2
+  int$ensembl_id_1 <- genelist2
+  int$ensembl_id_2 <- genelist1
+  sub2 <- rbind(sub2, int)
+  hybrid_net <- rbind(sub, sub2)
+  hybrid_net$Edge <- paste0(hybrid_net[,"ensembl_id_1"],"~",hybrid_net[,"ensembl_id_2"])
+
+
+  return(hybrid_net)
+}
+
+
+calc_hybrid_diff_edges <- function(hybrid1, hybrid2){
+    hybrid1 <- unique(expand_hybrid_network(hybrid1))
+    hybrid2 <- unique(expand_hybrid_network(hybrid2))
+
+    hybrid1$Edge <- paste0(hybrid1[,1],"~",hybrid1[,2])
+    hybrid2$Edge <- paste0(hybrid2[,1],"~",hybrid2[,2])
+
+    hybrid_out <- dplyr::filter(hybrid1, !Edge %in% hybrid2$Edge)
+    return(hybrid_out)
+}
+calc_hybrid_common_edges <- function(hybrid1, hybrid2){
+    el1 <- paste0(hybrid1[,1],"~",hybrid1[,2])
+    el2 <- paste0(hybrid2[,1],"~",hybrid2[,2])
+
+    hybrid1$Edge <- paste0(hybrid1[,1],"~",hybrid1[,2])
+    hybrid2$Edge <- paste0(hybrid2[,1],"~",hybrid2[,2])
+
+    hybrid_out <- dplyr::filter(hybrid1, Edge %in% hybrid2$Edge)
+
+    return(hybrid_out)
+    }
+
+plot_os_signatures <- function(os_signature, wgcna_gene_info, title = NULL, highlight_gene = NULL) {
+ 
+  if (is.character(os_signature) && file.exists(os_signature)) {
+    os_sig <- readRDS(os_signature)
+  } else if (is.data.frame(os_signature)) {
+    os_sig <- os_signature
+  }
+  if (is.character(wgcna_gene_info) && file.exists(wgcna_gene_info)) {
+    gene_info <- read.table(wgcna_gene_info, header = T, sep = "\t", stringsAsFactors = F)
+  } else if (is.data.frame(wgcna_gene_info)) {
+    gene_info <- wgcna_gene_info
+  }
+
+
+  os_sig <- left_join(os_sig, wgcna_gene_info[, 1:3], by = "ensembl_gene_id")
+  os_sig <- dplyr::filter(os_sig,!is.na(module_label))
+  
+    highlight_df <- rbind(dplyr::filter(os_sig, -log10(adj.p) >= 4, abs(estimate) >= 1.25), dplyr::filter(os_sig, -log10(adj.p) >= 4, abs(estimate) <= 0.75))
+    highlight_df <- highlight_df %>% group_by(module_label) %>% arrange(desc(abs(estimate))) %>% slice(1:15) %>% data.frame
+
+  if (!is.null(title)) {
+    title <- title
+  } else {
+    title <- title <- "OS associations by module"
+  }
+
+  if (!is.null(highlight_gene)) {
+    gene_highlight_df <- dplyr::filter(os_sig, hgnc_symbol %in% highlight_gene)
+    p <- ggplot(os_sig, aes(as.factor(module_label), log(estimate), group = as.factor(module_label), label = hgnc_symbol)) +
+      geom_boxplot(alpha = 0.6, width = 0.3, outlier.size = 0.01) +
+      geom_point(aes(size = -log10(adj.p)), shape = 21, color = "gray50", alpha = 0.5, position = position_jitter(width=0.2,seed = 10), fill = os_sig$module_color) +
+      theme_anf +
+      xlab("Module") +
+      labs(title = title) +
+      ylab("log(Hazard Ratio)") +
+      geom_text_repel(data = highlight_df, size = 3, fontface = "bold", color = "gray50", position = position_jitter(width=0.2,seed=10), min.segment.length = 0.2) +
+      geom_text_repel(data = gene_highlight_df, size = 4, color = "red", fontface = "bold", position = position_jitter(width=0.2,seed=10), min.segment.length = 0.1,bg.color="gray50", bg.r=0.05,max.overlaps=50) +
+      geom_hline(yintercept = 0, lty = 2, lwd = 2, color = "red", alpha = 0.4)
+  } else{
+      p <- ggplot(os_sig, aes(as.factor(module_label), log(estimate), group = as.factor(module_label), label = hgnc_symbol)) +
+      geom_boxplot(alpha = 0.6, width = 0.3, outlier.size = 0.01) +
+      geom_point(aes(size = -log10(adj.p)), shape = 21, color = "gray50", alpha = 0.5, position = position_jitter(width=0.2,seed = 10), fill = os_sig$module_color) +
+      theme_anf +
+      xlab("Module") +
+      labs(title = title) +
+      ylab("log(Hazard Ratio)") +
+      geom_text_repel(data = highlight_df, size = 3, fontface = "bold", color = "gray50", position = position_jitter(width=0.2,seed=10), min.segment.length = 0.1) +
+         geom_hline(yintercept = 0, lty = 2, lwd = 2, color = "red", alpha = 0.4)
+  }
+
+return(p)
+}
+
+
+auto_one_hot_encode <- function(model_df,sample_identifier="Cell_Line"){
+    require(caret)
+    all_cols <- colnames(model_df)
+    col_classes <- unlist(lapply(all_cols, function(x) class(model_df[,x])))
+    change_cols <- setdiff(all_cols[which(!col_classes %in% c("integer","logical","numeric"))],sample_identifier)
+
+    out <- model_df[setdiff(all_cols,change_cols)]
+    int <- model_df[change_cols]
+
+    sub <- list()
+    for(i in change_cols){
+        sub_int <- as.data.frame(do.call("cbind",lapply(sort(unique(int[,i])), function(x) as.integer(int[,i] ==x))))
+        colnames(sub_int) <- paste0(i,".",sort(unique(int[,i])))
+
+        sub[[i]] <- sub_int}
+
+    int <- do.call("cbind", sub)
+
+    out <- cbind(out,int)
+    return(out)
+    }
+
+counts_to_TPM <- function(counts_mat,annotations=NULL,ensembl_id_col=-1,log2_counts=TRUE){
+    require(biomaRt)
+    require(dplyr)
+    if(is.null(annotation)){
+        mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL",dataset="hsapiens_gene_ensembl")
+        annotations <- biomaRt::getBM(mart = mart, attributes=c("ensembl_gene_id", "external_gene_name", "start_position", "end_position"))
+        annotations$Length <- annotations$end_position-annotations$start_position
+        rownames(annotations) <- annotations[,1]
+    } else{ annotations <- annotations}
+    if(ensembl_id_col==-1){
+        genes <- rownames(counts_mat)} else{
+                                         genes <- counts_mat[,ensembl_id_col]
+                                         counts_mat[,ensembl_id_col] <- NULL
+                                     }
+
+
+    genes <- unlist(lapply(genes, function(x) unlist(strsplit(x,"\\."))[1]))
+    rownames(counts_mat) <- genes
+
+
+    counts_mat_sub <- counts_mat[which(genes %in% annotations$ensembl_gene_id),]
+
+
+    out <- counts_mat_sub
+    for(i in 1:ncol(counts_mat_sub)){
+        vec <- counts_mat_sub[,i]
+        if(log2_counts){
+            vec2 <- 2^vec/annotations[rownames(counts_mat_sub),"Length"]
+        } else{
+            vec2 <- vec/annotations[rownames(counts_mat_sub),"Length"]
+        }
+        int <- log2(1e6*(vec2/sum(vec2))+1)
+
+        out[,i] <- int
+
+        
+    }
+    return(out)}
