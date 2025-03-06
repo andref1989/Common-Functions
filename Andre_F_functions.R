@@ -5787,6 +5787,7 @@ plot_key_TF_essentiality <- function(Achilles_df, NTP_results,TSNE_df){
 
 
 sort_df <- function(df,column,sort_order=c(TRUE,FALSE)){
+    if(length(sort_order)>1){ sort_order <- TRUE}
     df <- df[order(df[,column],decreasing=sort_order),]
     return(df)}
 
@@ -6924,6 +6925,7 @@ plot_superimposed_graphs <- function(graph1,graph2,label1=NULL,label2=NULL,vsize
 }
 
 get_quantile <- function(vec,abs_val=FALSE){
+
     if(abs_val==TRUE){
         out <- ecdf(abs(vec))(abs(vec))} else{ out <- ecdf(vec)(vec)}
     if(is.null(names(vec))== FALSE){ names(out) <- names(vec)} 
@@ -8957,7 +8959,7 @@ seriate_matrix <- function(mat, reference_margin=c("row","column"),min_cutoff=0.
         if(!skip_hclust){
         alt_list <- colnames(mat)
         index <- hclust(dist(sub))$order
-##        print(rownames(sub)[index])
+        ## print(rownames(sub)[index])
         sub <- sub[index,]} else{
                               alt_list <- colnames(mat)
                               sub <- sub
@@ -8967,18 +8969,18 @@ seriate_matrix <- function(mat, reference_margin=c("row","column"),min_cutoff=0.
 
 
         best_available <- best[setdiff(names(best),j_blacklist)]
-##        str(best_available)
+        ## str(best_available)
         if(length(best_available)>=1){ if (best_available[1] >=min_cutoff) {j_blacklist <- c(j_blacklist,names(best_available[1])); indices <- c(indices,rownames(sub)[i])}}
 
-##    print(j_blacklist)
+    ## print(j_blacklist)}
 
     missing <- setdiff(alt_list,j_blacklist)
-##    str(missing)
+   ## str(missing)
         for(i in missing){
     ##        print(missing)
     ##    print(i)
         best <- sort(sub[,i],decreasing=TRUE)
-        ##print(best)
+        ## print(best)
         if(best[1] !=0){ insert_loc <- grep(names(best)[1], indices)
   ##                       print("Primary:")
        
@@ -8990,6 +8992,7 @@ seriate_matrix <- function(mat, reference_margin=c("row","column"),min_cutoff=0.
         sub <- sub[,j_blacklist]
 
     }} else if (reference_margin=="column") {
+    ## }} else if (reference_margin=="column") {
 
         if(!skip_hclust){
         alt_list <- rownames(sub)
@@ -9022,8 +9025,11 @@ seriate_matrix <- function(mat, reference_margin=c("row","column"),min_cutoff=0.
             if(length(insert_loc)==0){insert_loc <- grep(names(best)[2], indices)} else{
                                                                                      if(verbose){print("Moving to secondary")}}
 
-  ##                       str(insert_loc)
-                         j_blacklist <- c(j_blacklist[1:insert_loc], i, j_blacklist[(insert_loc+1):length(j_blacklist)])} else{ j_blacklist <- c(j_blacklist,i)}}
+            ## str(insert_loc)
+            
+            j_blacklist <- c(j_blacklist[1:insert_loc], i, j_blacklist[(insert_loc+1):length(j_blacklist)])} else{ j_blacklist <- c(j_blacklist,i)}}
+         j_blacklist <- j_blacklist[!is.na(j_blacklist)]
+         ## str(j_blacklist)
         sub <- sub[j_blacklist,]
 
     }
@@ -10463,7 +10469,9 @@ new_create_network_config <- function(BN_digraph,cm_file,TOM_file, wgcna_net_rds
 }
 
 
-freq_table_to_matrix <- function(df, row_name, column_name,value_name="Freq",default_fill=0){
+freq_table_to_matrix <- function(df, row_name=NULL, column_name=NULL,value_name="Freq",default_fill=0){
+    if(is.null(row_name)){ row_name <- colnames(df)[1]}
+    if(is.null(column_name)){ column_name <- colnames(df)[2]}
     df_mat <- matrix(default_fill, nrow=length(unique(df[,row_name])),ncol=length(unique(df[,column_name])))
     rownames(df_mat) <- unique(df[,row_name])
     colnames(df_mat) <- unique(df[,column_name])
@@ -11700,6 +11708,7 @@ for(i in 1:nrow(KD_predictions)){
     KD_predictions$Modules <- gsub("\\.","",KD_predictions$Modules)
 
     ## str(KD_predictions)
+    
 ############
 ##Format OS summary output
 ###########
@@ -11729,8 +11738,8 @@ for(i in unique(KD_predictions$Tranche)){
     mid$KD <- TRUE
     mid <- left_join(mid,module_summaries, by=c("Module","Network","Tranche","Gene"))
 KD_mat_list[[i]] <- mid
-        }
-
+        
+}
 
     return(KD_mat_list)
 
@@ -12535,17 +12544,21 @@ write.csv(x = results_bd,
 
 import_and_filter_KD_files <- function(directory,gene=NULL){
     file_list <- list.files(directory,"_kda.csv")
-
+    if(!is.null(gene)){gene_check <- all(grepl("ENSG[0-9]{1,13}", gene))
+    if(!gene_check){
+        node <- unique(dplyr::filter(tempusr::gene_annotation, hgnc_symbol %in% gene)$ensembl_gene_id)
+        if(!length(node) >=1){ print("Couldn't find target gene in KD file"); stop()} 
+    } else{
+        node <- node}}
+    target_node <- node
     KD_out <- data.frame(stringsAsFactors = F)
     for(i in file_list){
 
         kd_file <- i
-        KD_int <- dplyr::filter(read.csv(paste0(directory,kd_file)), significant ==TRUE) %>% dplyr::select(network,node,signature,padj)
+        KD_int <- dplyr::filter(read.csv(paste0(directory,kd_file)), significant ==TRUE,node %in% target_node) %>% dplyr::select(network,node,signature,padj)
 
         KD_int$Gene <- translate_ENSMBL_to_HGNC(KD_int$node)
-        if(!is.null(gene)){
-            KD_int <- dplyr::filter(KD_int, node %in% gene | Gene %in% gene) }
-        
+
 
         if(nrow(KD_int) >=1){
             KD_int$Tranche <- paste0("result_",unlist(strsplit(gsub("_results_kda.csv","",kd_file),"_"))[2])
@@ -12578,7 +12591,8 @@ calc_GSEA <- function(de_stat,
   
 }
 
-ANF_rank <- function(vec){
+
+    ANF_rank <- function(vec){
     rank <- (length(vec)+1)-rank(vec)
 
     return(rank)}
@@ -12610,7 +12624,7 @@ plot_patient_NTP_heatmaps <- function(NTP_output,metadata_df,column="Actual",pat
     }
 
 
-load_mantra_csr <- function(project_path, project_table,nrows=1e4,bq_auth_path="/Users/forbesa/Pathos_Projects_Data/p0085_Rain_Diligence/GCS_Credentials/tech-internal-clindev-8924d2a9a575.json"){
+load_mantra_csr <- function(project_path, project_table=NULL,nrows=1e4,bq_auth_path="/Users/forbesa/Pathos_Projects_Data/p0085_Rain_Diligence/GCS_Credentials/tech-internal-clindev-8924d2a9a575.json"){
     library(DBI)
     library(bigrquery)
     bq_auth(path=bq_auth_path)
@@ -12624,7 +12638,11 @@ load_mantra_csr <- function(project_path, project_table,nrows=1e4,bq_auth_path="
    
     con <- dbConnect(bigquery(),project = 'tech-internal-clindev',  dataset = project_path)
     available_tables <- dbListTables(con)
-    str(available_tables)
+
+    if(is.null(project_table)){
+        print("No table has been defined for import. List of available tables below.")
+        print(available_tables)
+        stop()}
 
     if(any(project_table %in% available_tables)){
         output <- list()
@@ -12643,5 +12661,73 @@ load_mantra_csr <- function(project_path, project_table,nrows=1e4,bq_auth_path="
     } else { output <- output}
     return(output)}
 
+anf_gost <- function(input_genes,gene_sets, gene_universe=NULL, min_genes=3, p_adjust_method="BH",user_threshold=0.1, significant=NULL){
+        if(is.vector(input_genes) &!is.list(input_genes)){
+            input_genes <- unique(input_genes)
+        } else if (!is.list(gene_sets) || is.list(input_genes)){ print("Malformed/incorrect input files");stop()}
+
+        if(is.null(gene_universe)){
+            gene_universe <- unique(unlist(gene_sets))
+            universe_size <- length(gene_universe)} else{ gene_universe <- unique(gene_universe); universe_size <- length(gene_universe)}
+
+        results <- data.frame(stringsAsFactors = F)
+
+        if(!is.null(names(gene_sets))){
+            for(i in names(gene_sets)){
+                sub_set <- unique(gene_sets[[i]])
+                if(length(sub_set) < min_genes){
+                    next}
+
+                term_size <- length(sub_set)
+                query_size <- length(input_genes)
+                overlap <- intersect(input_genes, sub_set)
+                precision <- length(overlap)/length(input_genes)
+                recall <- length(overlap)/length(sub_set)
+                term_id <- "Unknown"
+                term_source <- "User-Provided"
+                term_name <- i
+                pval <- phyper(q = length(overlap) - 1, m = length(sub_set),
+                n = universe_size - length(sub_set),
+                k = length(input_genes),
+                lower.tail = FALSE)
+                p_significant <- ifelse(pval <=user_threshold, TRUE, FALSE)
+                final_int <- data.frame(query="Default", significant=p_significant, p_value=pval, term_size, query_size, intersection_size=length(overlap), precision, recall, term_id,source=term_source,term_name, effective_domain_size=universe_size)
+                results <- rbind(results, final_int)
+        }
+
+                                        # Adjust p-values for multiple testing
+        results$adj_p_value <- p.adjust(results$p_value, method = p_adjust_method)
+
+                                        # Sort by adjusted p-value
+            results <- results[order(results$adj_p_value), ]
+
+} else{ print("Please provide a named geneset list"); stop()}
+        if(significant){ results <- results[which(results$adj_p_value <=user_threshold),]} else {results <- results}
+        out <- list(result=results)
+        return(out)
+        }
 
 
+jaccard2 <- function(object){
+    if(is.null(names(object))){
+        print("This function requires a *named* list object")
+        stop()}
+
+    combinations <- expand.grid(names(object),names(object),stringsAsFactors = F)
+    out_jaccard <- data.frame(stringsAsFactors = F)
+    for(i in 1:nrow(combinations)){
+        id1 <- combinations[i,1]
+        id2 <- combinations[i,2]
+
+        vec1 <- object[[id1]]
+        vec2 <- object[[id2]]
+
+        similarity <- length(intersect(vec1,vec2))/length(union(vec1,vec2))
+        if(length(vec1)>length(vec2)){ smallest <- vec2; largest <- vec1} else{ smallest <- vec1; largest <- vec2}
+            nestedness <- length(intersect(smallest,largest))/length(smallest)
+
+        int <- data.frame(id1,id2,similarity,nestedness)
+        out_jaccard <- rbind(out_jaccard, int)}
+
+    colnames(out_jaccard) <- c("Geneset1","Geneset2","Jaccard_Similarity","Nestedness")
+    return(out_jaccard)}
