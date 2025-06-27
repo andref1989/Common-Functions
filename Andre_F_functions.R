@@ -573,9 +573,9 @@ run_best_glmnet <- function(cv_glmnet_object, matrix, Gene){
     fit <- predict(cv_glmnet_object,newx=newx, s= best_lambda)
     
     readout <- round(cor(matrix[,Gene], fit)^2,3)
-    str(readout)
+##    str(readout)
 
-    return(list(cv_glmnet_object,coef(cv_glmnet_object),readout,num_pos))}
+    return(list("Model"=cv_glmnet_object,"Coefficients"=coef(cv_glmnet_object,s="lambda.min"),"R-Squared"=readout,"Num_Positive_Coeffs"=num_pos,"Predictions"=fit))}
 
 
 plot_glmnet_regression <- function(glmnet_object,cross_validation_status=FALSE, outfile, title,return_lambda=FALSE){
@@ -3479,7 +3479,7 @@ get_cluster_ids_from_metric_list <- function(metric_list,nested=TRUE){
     rownames(cluster_ids) <- common
     return(cluster_ids)}
 
-Calculate_cluster_similarity <- function(cluster_id_df, metadata_df, column=2,method=c("simple","complex","homogen"),both_ways=TRUE){
+calculate_cluster_similarity <- function(cluster_id_df, metadata_df, column=2,method=c("simple","complex","homogen"),both_ways=TRUE){
     df <- cluster_id_df
 
 
@@ -10262,7 +10262,33 @@ smooth_gr <- function(gr, binsize=100,genome=c("hg19","hg38"),y.field="score",pa
     bins$score <- unlist(lapply(1:length(bins), function(x) mean(mcols(intersect_with_metadata(gr,bins[x]))[,y.field])))
     bins$score[is.na(bins$score)] <- 0
 
+    return(bins)}
+
+smooth_gr2 <- function(gr, binsize=100,genome=c("hg19","hg38"),y.field="score",pad=1e3){
+    require(GenomicRanges)
+    require(gUtils)
+
+        if(genome=="hg19"){
+            seqlengths <- read.table("~/Genome_Annotation_Files/hg19/hg19_seqlengths.txt", header=T, sep='\t', stringsAsFactors = F)} else if(genome=="hg38"){ read.table("~/Genome_Annotation_Files/hg38/hg38_seqlengths.txt", header=T, sep='\t', stringsAsFactors = F)}
+
+    source("~/Andre_F_functions_git/Andre_F_functions.R")
+
+    ##        bins <- collapse_gtrack_list(tile(gr+pad,width=binsize))
+    bins <- grl.unlist(tile(gr+pad,width=binsize))
+
+
+        gr_out <- gr
+
+    print(length(gr_out))
+##    print(sum(width(gr_out)))
+
+    print(length(bins))
+##    print(sum(width(bins)))
+    bins$score <- unlist(lapply(1:length(bins), function(x) mean(mcols(intersect_with_metadata(gr,bins[x]))[,y.field])))
+    bins$score[is.na(bins$score)] <- 0
+
         return(bins)}
+
 
 rescale_gr <- function(gr,metadata_column="score",range=c(0,1)){
     require(GenomicRanges)
@@ -10427,6 +10453,29 @@ new_pathos_RMD <- function(report_title,rootdir="~/",default_rmd="/Users/forbesa
     }
 
     else{ print("No output report path specified, stopping!"); stop()}}
+
+
+
+new_BD_RMD <- function(report_title,rootdir="~/",default_rmd="/Users/forbesa/ANF_BD2.0.Rmd",gene_of_interest="MDM2", out_report=NULL, related_genes=NULL){
+    if(!is.null(out_report)){
+        system(paste0("cp ", default_rmd," ",out_report))
+    }
+    else{
+        out_report <- paste0(gene_of_interest,"_BD2.0_report.Rmd")
+        system(paste0("cp ", default_rmd," ",out_report))
+}
+
+
+    system(paste0("sed -i '' 's/default_title/",report_title,"/g' ",out_report))
+    system(paste0("sed -i '' 's#default_rootdir#",rootdir,"#g' ",out_report))
+    system(paste0("sed -i '' 's#insert_gene#",gene_of_interest,"#g' ",out_report))
+
+
+    if(!is.null(related_genes)){ system(paste0("sed -i '' 's#related_genes#",related_genes,"#g' ",out_report))
+    } else{
+        related_genes <- "NULL"
+        system(paste0("sed -i '' 's#related_genes#",related_genes,"#g' ",out_report))}
+}
 
 
 new_prepare_hybrid_network <- function(net_name_variable, wgcna_net_rds,wgcna_beta_tom,mediation_file,BN_digraph,default_prepare_r="/Users/forbesa/p0069_prepare_network.R",out_prepare_r=NULL){
@@ -12624,7 +12673,7 @@ plot_patient_NTP_heatmaps <- function(NTP_output,metadata_df,column="Actual",pat
     }
 
 
-load_mantra_csr <- function(project_path, project_table=NULL,nrows=1e4,bq_auth_path="/Users/forbesa/Pathos_Projects_Data/p0085_Rain_Diligence/GCS_Credentials/tech-internal-clindev-8924d2a9a575.json"){
+load_mantra_csr <- function(project_path, project_table=NULL,nrows=1e4,bq_auth_path="/Users/forbesa/Pathos_Projects_Data/p0085_Rain_Diligence/GCS_Credentials/tech-internal-clindev-8924d2a9a575.json",verbose=F,...){
     library(DBI)
     library(bigrquery)
     bq_auth(path=bq_auth_path)
@@ -12647,11 +12696,11 @@ load_mantra_csr <- function(project_path, project_table=NULL,nrows=1e4,bq_auth_p
     if(any(project_table %in% available_tables)){
         output <- list()
         project_table <- intersect(project_table, available_tables)
-        str(project_table)
+        if(verbose){str(project_table)}
         for(i in project_table){
-            print(i)
+           if(verbose){ print(i)}
             sql_statement=paste0("SELECT * FROM `", i,"`")
-            print(sql_statement)
+            ## print(sql_statement)
             int <- tryCatch({dbGetQuery(con,sql_statement,n=as.numeric(nrows))}, error=function(e) { print("Cannot Connect")})
             
         output[[i]] <- int}} else{ print("The table provided is not available in the chosen project directory")}
@@ -12731,3 +12780,92 @@ jaccard2 <- function(object){
 
     colnames(out_jaccard) <- c("Geneset1","Geneset2","Jaccard_Similarity","Nestedness")
     return(out_jaccard)}
+
+get_all_possible_combinations <- function(vector, min_size=1, max_size=NULL){
+
+    if(is.null(max_size)){ max_size <- length(unique(vector))}
+
+    sequence <- seq(min_size, max_size,by=1)
+    combinations <- c()
+    for(i in sequence){
+        int_vec <- combn(vector,i,simplify=F)
+        int_vec <- lapply(int_vec,function(x) paste0(x, collapse=" + "))
+        combinations <- c(combinations, unlist(int_vec))
+    }
+    return(combinations)
+}
+
+word_freq_eval <- function(text_list){
+
+    word_vec <- unlist(lapply(text_list, function(x) lapply(x, function(y) unlist(strsplit(y," ")))))
+    word_freq <- as.data.frame(sort(table(word_vec)))
+    colnames(word_freq)[1] <- "Word"
+    word_freq$Total_Documents <- length(text_list)
+
+    word_freq_clean <- word_freq %>% dplyr::mutate(Word_Clean=gsub("[^[:alnum:] ]","",Word)) %>% group_by(Word_Clean) %>% dplyr::mutate(Freq_Clean=sum(Freq)) %>% dplyr::select(Word=Word_Clean, Freq=Freq_Clean, Total_Documents) %>% dplyr::filter(Word !="") %>% unique %>% data.frame %>% arrange(desc(Freq))
+
+    word_freq_clean$Total <- sum(word_freq_clean$Freq)
+
+    word_freq_clean$Term_Frequency <- word_freq_clean$Freq/word_freq_clean$Total
+    
+    word_freq_clean$Document_Frequency <- unlist(lapply(word_freq_clean[,1], function(x) sum(unlist(lapply(text_list, function(y) any(grepl(gsub("[^[:alnum:] ]","",x),y)))))))
+
+    word_freq_clean$Inverse_Document_Frequency <- log(word_freq_clean$Total_Documents/word_freq_clean$Document_Frequency)
+    word_freq_clean$TF_IDF <- word_freq_clean$Term_Frequency * word_freq_clean$Inverse_Document_Frequency
+    word_freq_clean <- word_freq_clean %>% arrange(desc(TF_IDF))
+
+    return(word_freq_clean)
+    }
+
+
+
+
+compare_data_models <- function(cohort1, cohort2, max_size=3e7,exclude_numeric=TRUE,blacklist=c("gene_expression","master_file","transcript"),test=F,max_rows=NULL){
+    file_list1 <- list.files(cohort1,".csv",recursive=T)
+    file_list1 <- file_list1[unlist(lapply(file_list1, function(x) file.info(paste0(cohort1,x))$size <=max_size))]
+
+    file_list2 <- list.files(cohort2,".csv",recursive=T)
+    file_list2 <- file_list2[unlist(lapply(file_list2, function(x) file.info(paste0(cohort2,x))$size <=max_size))]
+
+
+    file_list1 <- file_list1[!grepl(paste0(blacklist,collapse="|"), file_list1)]
+    file_list2 <- file_list2[!grepl(paste0(blacklist,collapse="|"), file_list2)]
+
+###Import data
+    if(test){
+        if(is.null(max_rows)){ max_rows <- 1e3} 
+        table_list1 <- lapply(file_list1, function(x) read.delim(paste0(cohort1,x),nrows=max_rows,sep=","))
+        table_list2 <- lapply(file_list2, function(x) read.delim(paste0(cohort2,x),nrows=max_rows,sep=","))
+    } else{
+        if(is.null(max_rows)){ max_rows <- -1}
+        table_list1 <- lapply(file_list1, function(x) read.delim(paste0(cohort1,x),sep=",",nrows=max_rows))
+        table_list2 <- lapply(file_list2, function(x) read.delim(paste0(cohort2,x),sep=",",nrows=max_rows))
+    }
+
+    names(table_list1) <- paste0(cohort1,file_list1)
+    names(table_list2) <- paste0(cohort2,file_list2)
+
+###Remove columns with numerical values
+    table_list1 <- lapply(table_list1, function(x) x[apply(x,2, function(y) !class(y) %in% c("numeric","integer","float"))])
+    table_list2 <- lapply(table_list2, function(x) x[apply(x,2, function(y) !class(y) %in% c("numeric","integer","float"))])
+
+###Remove columns with dates and ids
+    table_list1 <- lapply(table_list1, function(x) x[!grepl("_date_|_days_from_|_id$", colnames(x))])
+    table_list2 <- lapply(table_list2, function(x) x[!grepl("_date_|_days_from_|_id$", colnames(x))])
+
+#### Get unique values of each table
+    table_list1 <- lapply(table_list1, function(x) toupper(unique(unlist(x))))
+    table_list2 <- lapply(table_list2, function(x) toupper(unique(unlist(x))))
+
+    final_list <- c(table_list1,table_list2)
+    out <- jaccard2(final_list)
+    colnames(out)[1:2] <- c("File1","File2")
+    out$Cohort1 <- unlist(lapply(out$File1, function(x) last(unlist(strsplit(gsub("/[0-9]{1,2}Q[0-9]","",str_extract(x,paste0(cohort1,"|",cohort2))),"/")))))
+
+    out$Cohort2 <- unlist(lapply(out$File2, function(x) last(unlist(strsplit(gsub("/[0-9]{1,2}Q[0-9]","",str_extract(x,paste0(cohort1,"|",cohort2))),"/")))))
+
+    out$Table1 <- unlist(lapply(out$File1, function(x) last(unlist(strsplit(x,"/")))))
+    out$Table2 <- unlist(lapply(out$File2, function(x) last(unlist(strsplit(x,"/")))))
+    return(out)
+
+ }

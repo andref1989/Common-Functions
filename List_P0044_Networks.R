@@ -33,3 +33,35 @@ networks <- networks |>
     networks <- dplyr::filter(networks, grepl("[0-9]{2}Q[0-9]",network)) %>% arrange(desc(network))
     return(networks)
 }
+
+
+list_p69_networks <- function(directory="alpha",filter_tempus=TRUE){
+        library(googleCloudStorageR)
+        library(gargle)
+        output_list <- list()
+
+        scope <- c("https://www.googleapis.com/auth/cloud-platform")
+
+        token <- token_fetch(scopes = scope)
+        gcs_auth(token = token)
+
+
+
+    p69_result_version <- directory
+
+    networks <- googleCloudStorageR::gcs_list_objects(bucket = "pathos-research-results",
+                                                  prefix = sprintf("project_0069/%s",
+                                                                   p69_result_version))
+
+    networks <- networks |>
+  dplyr::mutate(network = stringr::str_split_i(name,
+                                               "\\/",
+                                               -2)) |>
+  dplyr::select(network,name) |>
+  dplyr::distinct() %>% dplyr::filter(grepl("edge.csv|edges.csv|edge.tsv|edges.tsv", name),network!=directory)
+        if(filter_tempus){
+              networks <- dplyr::filter(networks, grepl("[0-9]{2}Q[0-9]",network))}
+
+
+        return(networks)
+        }
