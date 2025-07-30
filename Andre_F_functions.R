@@ -6847,7 +6847,7 @@ translate_ENSMBL_to_HGNC <- function(ENSEMBL_IDs,version="EnsDb.Hsapiens.v86",ke
 ##    ENSEMBL_IDs <- unique(ENSEMBL_IDs)
 ##    str(ENSEMBL_IDs)
     ##    symbols <- ensembldb::select(get(version),keys=ENSEMBL_IDs,keytype=key, columns=column)
-    gene_df <- tempusr::gene_annotation
+    gene_df <- as.data.frame(tempusr::gene_annotation)
     rownames(gene_df) <- gene_df$ensembl_gene_id
     
     
@@ -10163,13 +10163,24 @@ parse_OxBS <- function(OxBS,outfile, genome="hg19") {
     print("Finished")}
 
 group_df <- function(df, metadata, meta_col,sample_col="Sample") {
-    classes <- unique(metadata[,meta_col])
-    
 
     metadata <- metadata[which(metadata[,sample_col] %in% colnames(df)),]
-    out <- as.data.frame(do.call("cbind", lapply(classes, function(x) rowMeans(df[,metadata[which(metadata[,meta_col] ==x),sample_col]]))))
-##    str(out)
-    colnames(out) <- classes
+    metadata$Classes <- gsub("[^a-zA-Z]","_",metadata[,meta_col])
+    metadata$Classes <- gsub("^[^a-zA-Z]","",metadata$Classes)
+    metadata[,meta_col] <- metadata$Classes
+    classes <- unique(metadata[,meta_col])
+
+    metadata <- metadata[which(metadata[,sample_col] %in% colnames(df)),]
+    freq_table <- as.data.frame(table(metadata[,meta_col]))
+    classes1 <- dplyr::filter(freq_table,Freq>1)[,1]
+    classes2 <- dplyr::filter(freq_table,Freq<=1)[,1]
+
+    out1 <- do.call("cbind",lapply(classes1, function(x) rowMeans(df[,metadata[which(metadata[,meta_col] ==x),sample_col]])))
+    out2 <- do.call("cbind",lapply(classes2, function(x) df[,metadata[which(metadata[,meta_col] ==x),sample_col]]))
+
+
+    out <- as.data.frame(cbind(out1,out2))
+    colnames(out) <- c(classes1,classes2)
     return(out)}
 
 
@@ -12869,3 +12880,93 @@ compare_data_models <- function(cohort1, cohort2, max_size=3e7,exclude_numeric=T
     return(out)
 
  }
+
+
+
+characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
+    require(tempusr)
+    require(dplyr)
+    require(diptest)
+
+    if(!is.character(cohort_path) && is.list(cohort_path)){ td <- cohort_path} else{
+
+    if(any(grepl("parquet",list.files(cohort_path,"parquet",recursive=T)))){
+    print("Parquet")
+    td <- tryCatch({load_tempus_data(cohort_path, collection=NULL,
+                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing"))
+    }, error=function(f){"dud_cohort"})} else{
+  td <- tryCatch({load_tempus_data(cohort_path, collection=NULL,
+                                   list_files=c("g_rna_gene_expression","g_molecular_master_file"))}, 
+                 error=function(e){ tryCatch({load_tempus_data(cohort_path, collection=NULL,
+                                                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing"))
+                 }, error=function(f){"dud_cohort"})})}
+                                                                             }
+    if(is.data.frame(td[[1]])){
+    td <- lapply(td, function(x) as.data.frame(x))
+
+    data_model <- calc_data_model(td,c("g_rna_gene_expression","g_molecular_master_file"),c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing"))
+
+    skewness <- function(vec){
+        n <- length(vec)
+        mean_data <- mean(vec, na.rm=T)
+        sd_data <- sd(vec, na.rm=T)
+        skew  <- (n * sum((vec - mean_data)^3)) / ((n - 1) * (n - 2) * sd_data^3)
+        return(skew)}
+
+    prep_characterization_DM1 <- function(td){
+        cnv <- as.data.frame(tempusr::calc_cnv(td))
+        expression <- as.data.frame(td$g_rna_gene_expression) %>% group_by(gene_code) %>% dplyr::summarize(Mean_Expression=mean(log2_gene_tpm,na.rm=T),Top_25=quantile(log2_gene_tpm, 0.75,na.rm=T), Bottom_25=quantile(log2_gene_tpm, 0.25, na.rm=T),Skew=skewness(log2_gene_tpm),Bimodality=dip.test(log2_gene_tpm)$statistic, Bimodality_Pval=dip.test(log2_gene_tpm)$p.value)
+        expression$gene_canonical_name <- unlist(translate_ENSMBL_to_HGNC( expression$gene_code))
+        snv <- as.data.frame(dplyr::filter(td$g_molecular_master_file, !grepl( assay_blacklist,assay )) %>% dplyr::select(patient_id, analysis_id,  variant_type, gene_canonical_name, functional_impact, mutation_effect, variant_allele_freq, somatic_germline,coverage))
+        snv$Cohort_Size <- length(unique(td$g_molecular_master_file$patient_id))
+        snv <- snv %>% dplyr::filter(variant_type =="Short Variant", !functional_impact %in% c("B","LB"),!grepl("stream|intron|UTR",mutation_effect), coverage !=1) %>% dplyr::select(-coverage) %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE",grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
+        snv <- snv %>% group_by( gene_canonical_name,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF=round(mean(variant_allele_freq,na.rm=T),3)) %>% ungroup %>% group_by( gene_canonical_name,Mut,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction_by_mut_effect=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF_by_mut_effect=round(mean(variant_allele_freq,na.rm=T),3)) %>% data.frame
+
+
+
+
+        snv_out <- dplyr::select(snv, gene_canonical_name,  functional_impact, somatic_germline, Cohort_Size, Fraction, Mean_VAF, Fraction_by_mut_effect, Mean_VAF_by_mut_effect,Alteration=Mut)
+        cnv_out <- cnv %>% group_by(gene_canonical_name) %>% dplyr::summarize(Mean_CN=mean(copy_number,na.rm=T),Skew=skewness(copy_number),Bimodality=dip.test(copy_number)$statistic, Bimodality_Pval=dip.test(copy_number)$p.value,n_measured=length(unique(analysis_id))) %>% dplyr::filter(n_measured > 0.1* unique(snv$Cohort_Size))
+
+        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))))
+        out[[1]]$Cohort <- cohort_name
+        out[[2]]$Cohort <- cohort_name
+        return(out)
+    }
+    prep_characterization_DM2 <- function(td){
+        cnv <- as.data.frame(tempusr::calc_cnv(td))
+
+        expression <- as.data.frame(td$onco_result_rna_gene) %>% group_by(gene_symbol) %>% dplyr::summarize(Mean_Expression=mean(tpm_log2,na.rm=T),Top_25=quantile(tpm_log2, 0.75,na.rm=T), Bottom_25=quantile(tpm_log2, 0.25, na.rm=T),Skew=skewness(tpm_log2),Bimodality=dip.test(tpm_log2)$statistic, Bimodality_Pval=dip.test(tpm_log2)$p.value)
+        expression$gene_canonical_name <- expression$gene_symbol
+
+
+        snv <- as.data.frame(dplyr::filter(td$onco_result_snv_indel_passing, !grepl( assay_blacklist,assay )) %>% dplyr::mutate(coverage=sum(c(tumor_total_reads, normal_total_reads),na.rm=T), somatic_germline=ifelse(grepl("germline",variant_origin),"G","S")) %>% dplyr::select(patient_id, tumor_biospecimen_id, variant_type=variant_type_detailed, gene_canonical_name=gene_symbol, functional_impact=variant_classification, mutation_effect=variant_molecular_consequence, variant_allele_freq=tumor_variant_allele_frequency, somatic_germline,coverage))
+        snv$Cohort_Size <- length(unique(td$onco_result_snv_indel_passing$patient_id))
+
+
+        snv <- snv %>% dplyr::filter(variant_type =="snv", !functional_impact %in% c("B","LB"),!grepl("stream|intron|UTR",mutation_effect), coverage !=1) %>% dplyr::select(-coverage) %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE",grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
+
+        snv <- snv %>% group_by(gene_canonical_name,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF=round(mean(variant_allele_freq,na.rm=T),3)) %>% ungroup %>% group_by(gene_canonical_name,Mut,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction_by_mut_effect=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF_by_mut_effect=round(mean(variant_allele_freq,na.rm=T),3)) %>% data.frame
+
+
+        snv_out <- dplyr::select(snv, gene_canonical_name,  functional_impact, somatic_germline, Cohort_Size, Fraction, Mean_VAF, Fraction_by_mut_effect, Mean_VAF_by_mut_effect,Alteration=Mut)
+
+        cnv_out <- cnv %>% group_by(gene_canonical_name) %>% dplyr::summarize(Mean_CN=mean(copy_number,na.rm=T),Skew=skewness(copy_number),Bimodality=dip.test(copy_number)$statistic, Bimodality_Pval=dip.test(copy_number)$p.value,n_measured=length(unique(tumor_biospecimen_id))) %>% dplyr::filter(n_measured > 0.1* unique(snv$Cohort_Size))
+
+        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))))
+        out[[1]]$Cohort <- cohort_name
+        out[[2]]$Cohort <- cohort_name
+        return(out)
+    }
+
+    
+    if(data_model=="1.0"){
+        out <- prep_characterization_DM1(td)
+    } else if (data_model=="2.0"){
+        out <- prep_characterization_DM2(td)}
+
+
+    out <- lapply(out, data.frame)
+
+    return(out)
+    } else{ print(paste0("Could not import Tempus data for ",cohort_name))}}
