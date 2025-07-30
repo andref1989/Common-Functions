@@ -12922,15 +12922,23 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
         snv <- snv %>% dplyr::filter(variant_type =="Short Variant", !functional_impact %in% c("B","LB"),!grepl("stream|intron|UTR",mutation_effect), coverage !=1) %>% dplyr::select(-coverage) %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE",grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
         snv <- snv %>% group_by( gene_canonical_name,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF=round(mean(variant_allele_freq,na.rm=T),3)) %>% ungroup %>% group_by( gene_canonical_name,Mut,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction_by_mut_effect=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF_by_mut_effect=round(mean(variant_allele_freq,na.rm=T),3)) %>% data.frame
 
+        valid_cnv <- as.data.frame(table(cnv$gene_canonical_name)) %>% dplyr::filter(Freq >=0.1*unique(snv$Cohort_Size))
+        common_genes <- intersect(valid_cnv[,1],unlist(translate_ENSMBL_to_HGNC(td$g_rna_gene_expression$gene_code)))
+        common_patients <- intersect(unique(td$g_rna_gene_expression$patient_id), unique(dplyr::filter(td$g_molecular_master_file, analysis_id %in% as.data.frame(cnv)[,1])$patient_id))
 
+        sub_expr <- as.data.frame(td$g_rna_gene_expression) %>% dplyr::select(patient_id,gene_code, log2_gene_tpm)
+        sub_expr$gene_canonical_name <- unlist(translate_ENSMBL_to_HGNC(sub_expr$gene_code))
+        sub_expr <- dplyr::filter(sub_expr, patient_id %in% common_patients, gene_canonical_name %in% common_genes)
+        cnv_vs_expression <- left_join(cnv, unique(dplyr::select(td$g_molecular_master_file,patient_id,analysis_id))) %>% dplyr::filter(gene_canonical_name %in% common_genes, patient_id %in% common_patients) %>% left_join(sub_expr) %>% group_by(gene_canonical_name) %>% dplyr::summarize(Correlation=round(rcorr(log2_gene_tpm,copy_number)[[1]][1,2],3),Correlation_Pval=round(rcorr(log2_gene_tpm,copy_number)[[3]][1,2],3),Correlation_N=rcorr(log2_gene_tpm,copy_number)[[2]][1,2]) %>% data.frame
 
 
         snv_out <- dplyr::select(snv, gene_canonical_name,  functional_impact, somatic_germline, Cohort_Size, Fraction, Mean_VAF, Fraction_by_mut_effect, Mean_VAF_by_mut_effect,Alteration=Mut)
         cnv_out <- cnv %>% group_by(gene_canonical_name) %>% dplyr::summarize(Mean_CN=mean(copy_number,na.rm=T),Skew=skewness(copy_number),Bimodality=dip.test(copy_number)$statistic, Bimodality_Pval=dip.test(copy_number)$p.value,n_measured=length(unique(analysis_id))) %>% dplyr::filter(n_measured > 0.1* unique(snv$Cohort_Size))
 
-        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))))
+        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))),"cnv_vs_expression"=as.data.frame(cnv_vs_expression))
         out[[1]]$Cohort <- cohort_name
         out[[2]]$Cohort <- cohort_name
+        out[[3]]$Cohort <- cohort_name
         return(out)
     }
     prep_characterization_DM2 <- function(td){
@@ -12949,13 +12957,25 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
         snv <- snv %>% group_by(gene_canonical_name,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF=round(mean(variant_allele_freq,na.rm=T),3)) %>% ungroup %>% group_by(gene_canonical_name,Mut,functional_impact,somatic_germline) %>% dplyr::mutate(Fraction_by_mut_effect=round(length(unique(patient_id))/Cohort_Size,3),Mean_VAF_by_mut_effect=round(mean(variant_allele_freq,na.rm=T),3)) %>% data.frame
 
 
+        
+        valid_cnv <- as.data.frame(table(cnv$gene_canonical_name)) %>% dplyr::filter(Freq >=0.1*unique(snv$Cohort_Size))
+        common_genes <- intersect(valid_cnv[,1],td$onco_result_rna_gene$gene_symbol)
+        common_patients <- intersect(unique(td$onco_result_rna_gene$patient_id), unique(dplyr::filter(td$onco_result_cnv_gene, tumor_biospecimen_id %in% as.data.frame(cnv)[,1])$patient_id))
+
+        sub_expr <- as.data.frame(td$onco_result_rna_gene) %>% dplyr::select(tumor_biospecimen_id,patient_id,gene_canonical_name=gene_symbol, tpm_log2)
+        sub_expr <- dplyr::filter(sub_expr, patient_id %in% common_patients, gene_canonical_name %in% common_genes)
+        cnv_vs_expression <- cnv %>% dplyr::filter(gene_canonical_name %in% common_genes) %>% left_join(sub_expr) %>% dplyr::filter(patient_id %in% common_patients) %>% group_by(gene_canonical_name) %>% dplyr::summarize(Correlation=round(rcorr(tpm_log2,copy_number)[[1]][1,2],3),Correlation_Pval=round(rcorr(tpm_log2,copy_number)[[3]][1,2],3),Correlation_N=rcorr(tpm_log2,copy_number)[[2]][1,2]) %>% data.frame
+
+
+        
         snv_out <- dplyr::select(snv, gene_canonical_name,  functional_impact, somatic_germline, Cohort_Size, Fraction, Mean_VAF, Fraction_by_mut_effect, Mean_VAF_by_mut_effect,Alteration=Mut)
 
         cnv_out <- cnv %>% group_by(gene_canonical_name) %>% dplyr::summarize(Mean_CN=mean(copy_number,na.rm=T),Skew=skewness(copy_number),Bimodality=dip.test(copy_number)$statistic, Bimodality_Pval=dip.test(copy_number)$p.value,n_measured=length(unique(tumor_biospecimen_id))) %>% dplyr::filter(n_measured > 0.1* unique(snv$Cohort_Size))
 
-        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))))
+        out <- list("expression"=as.data.frame(expression), "mutations"=unique(as.data.frame(left_join(snv_out,cnv_out))),"cnv_vs_expression"=as.data.frame(cnv_vs_expression))
         out[[1]]$Cohort <- cohort_name
         out[[2]]$Cohort <- cohort_name
+        out[[3]]$Cohort <- cohort_name
         return(out)
     }
 
