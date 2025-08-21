@@ -11187,7 +11187,7 @@ insertLayer <- function(plotObj, after=1, ...) {
   hybrid_net <- rbind(sub, sub2)
 
   ### Get HGNC symbols
-  gene_df <- tempusr::gene_annotation
+  gene_df <- as.data.frame(tempusr::gene_annotation)
   rownames(gene_df) <- gene_df[, 1]
 
   hybrid_net$Gene1 <- gene_df[hybrid_net[, "ensembl_id_1"], "hgnc_symbol"]
@@ -12884,6 +12884,7 @@ compare_data_models <- function(cohort1, cohort2, max_size=3e7,exclude_numeric=T
 
 
 characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
+#### Work in progress 
     require(tempusr)
     require(dplyr)
     require(diptest)
@@ -12893,12 +12894,12 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
     if(any(grepl("parquet",list.files(cohort_path,"parquet",recursive=T)))){
     print("Parquet")
     td <- tryCatch({load_tempus_data(cohort_path, collection=NULL,
-                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing"))
+                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing","onco_regimen"))
     }, error=function(f){"dud_cohort"})} else{
   td <- tryCatch({load_tempus_data(cohort_path, collection=NULL,
-                                   list_files=c("g_rna_gene_expression","g_molecular_master_file"))}, 
+                                   list_files=c("g_rna_gene_expression","g_molecular_master_file","regimen"))}, 
                  error=function(e){ tryCatch({load_tempus_data(cohort_path, collection=NULL,
-                                                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing"))
+                                                               list_files=c("onco_result_rna_gene","onco_result_cnv_gene","onco_result_snv_indel_passing","onco_regimen"))
                  }, error=function(f){"dud_cohort"})})}
                                                                              }
     if(is.data.frame(td[[1]])){
@@ -12976,6 +12977,7 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
         out[[1]]$Cohort <- cohort_name
         out[[2]]$Cohort <- cohort_name
         out[[3]]$Cohort <- cohort_name
+
         return(out)
     }
 
@@ -12987,6 +12989,509 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
 
 
     out <- lapply(out, data.frame)
+    out$Tx_Drug <- plot_treatment_journeys(td,plot_option="Drug",title=paste0(cohort_name, " treatment journeys by drug regimen"))
+    out$Tx_Class <- plot_treatment_journeys(td,plot_option="Class",title=paste0(cohort_name, " treatment journeys by drug class"))
 
     return(out)
     } else{ print(paste0("Could not import Tempus data for ",cohort_name))}}
+
+
+calc_tx_at_bx <- function(data_cohort=NULL,clinical_timeline_output=NULL){
+
+############  Parse the inputs provided and import data if necessary ##################
+    if(!is.null(cohort_path) && is.character(data_cohort)){
+              input_td <- load_tempus_data(data_cohort,
+                                   collection = default,
+                                   list_files = list_files_dm1)
+    } else if(!is.null(cohort_path) && is.list(data_cohort)){
+        input_td <- data_cohort}
+
+############  Calculate patient clinical timelines if necessary ##################
+
+    if(is.null(clinical_timeline_output)){
+        timeline <- calc_clinical_timeline(input_td)} else if(!is.null(clinical_timeline_output)) { timeline <- clinical_timeline_output}
+
+
+
+############  Checking the data model ##################
+    list_files_dm1 <- c("regimen")
+    list_files_dm2 <- c("onco_regimen")
+
+    data_model_check <- calc_data_model(input_td,
+                                        list_tables_dm_1 = list_files_dm1,
+                                        list_tables_dm_2 = list_files_dm2)
+
+    stopifnot(data_model_check %in% c("1.0","2.0"))
+
+########################################################################
+###### Get diagnosis date and death date for edge cases ################
+#########################################################################
+
+
+###WILL NEED TO FIX!!!!
+
+    diag_df <- dplyr::filter(clin_timeline_DM2, patient_id %in% regimen$patient_id, grepl("initial_diagnosis",source_table))
+    
+
+    
+############  Define DM specific functions ##################
+
+
+    
+    prep_regimen_dm1 <- function(td){
+
+
+
+
+
+    }
+
+    prep_regimen_dm2 <- function(td){
+
+        regimen <- dplyr::select(td$onco_regimen ,patient_id, regimen=agents,therapy_class, therapy_class_group, regimen_sequence, start_date_indexed, start_date_precision,start_year=start_date_year_indexed, end_date_indexed, end_date_precision,end_year=end_date_year_indexed)
+        regimen$row <- 1:nrow(regimen)
+
+        int_regimen <- data.frame(stringsAsFactors = F)
+#############################################
+##### Get regimens with YYYY-MM-DD precision
+#############################################
+
+        full_precision <- regimen %>% dplyr::filter(start_date_precision=="YYYY-MM-DD" & end_date_precision=="YYYY-MM-DD")
+        int_regimen <- rbind(int_regimen, full_precision)
+#############################################
+##### Modifying end dates that are in YYYY-MM precision
+#############################################
+        full_start_semi <- regimen %>% dplyr::filter(start_date_precision=="YYYY-MM-DD" & end_date_precision=="YYYY-MM")
+        full_start_semi$end_date_indexed <- as.IDate(paste0(full_start_semi$end_date_indexed,"-15"))
+        int_regimen <- rbind(int_regimen, full_start_semi)
+
+#############################################
+##### Modifying start dates that are in YYYY-MM precision
+#############################################
+
+        full_end_semi <- regimen %>% dplyr::filter(start_date_precision=="YYYY-MM" & end_date_precision=="YYYY-MM-DD")
+        full_end_semi$start_date_indexed <- as.IDate(paste0(full_end_semi$start_date_indexed,"-15"))
+        int_regimen <- rbind(int_regimen, full_end_semi)
+
+#############################################
+##### Modifying start and end dates that are both in YYYY-MM precision
+#############################################
+
+        semi_both <- regimen %>% dplyr::filter(start_date_precision=="YYYY-MM" & end_date_precision=="YYYY-MM")
+        semi_both$start_date_indexed <- as.IDate(paste0(semi_both$start_date_indexed,"-15"))
+        semi_both$end_date_indexed <- as.IDate(paste0(semi_both$end_date_indexed,"-15"))
+
+        int_regimen <- rbind(int_regimen, semi_both)
+
+#############################################
+##### Modifying start and end dates that are both in YYYY precision
+#############################################
+
+        year_both <- regimen %>% dplyr::filter(start_date_precision=="YYYY",end_date_precision == "YYYY")
+        year_both$start_date_indexed <- as.IDate(paste0(year_both$start_date_indexed,"-1-1"))
+        year_both$end_date_indexed <- as.IDate(paste0(year_both$end_date_indexed,"-12-31"))
+        int_regimen <- rbind(int_regimen, year_both)
+
+        
+
+        year_only_start <- regimen %>% dplyr::filter(start_date_precision=="YYYY",end_date_precision %in% c("YYYY-MM-DD"))
+        year_only_start$start_date_indexed <- as.IDate(paste0(year_only_start$start_date_indexed,"-1-1"))
+        int_regimen <- rbind(int_regimen, year_only_start)
+
+        
+        year_only_end <- regimen %>% dplyr::filter(end_date_precision == "YYYY", start_date_precision %in% c("YYYY-MM-DD"))
+        year_only_end$end_date_indexed <- as.IDate(paste0(year_only_end$end_date_indexed,"-12-31"))
+
+        int_regimen <- rbind(int_regimen(year_only_start))
+
+        
+#### Replace NA in regimen end dates with last known
+        missing_end <- dplyr::filter(regimen, is.na(end_date_indexed))
+        replace_index <- which(is.na(missing_end$end_date_indexed))
+        replace_dates <- dplyr::filter(input_td$onco_patient, patient_id %in% missing_end[replace_index,"patient_id"])
+        missing_end$end_date_indexed[replace_index[match(dplyr::filter(DDLPS_patient_metadata, patient_id %in% regimen[replace_index,"patient_id"])$patient_id, regimen[replace_index,"patient_id"])]] <- replace_dates$last_known_followup_date_indexed
+
+regimen$Flag[replace_index[match(dplyr::filter(DDLPS_patient_metadata, patient_id %in% regimen[replace_index,"patient_id"])$patient_id, regimen[replace_index,"patient_id"])]] <- "Missing Tx End"
+
+
+####
+
+patient_biopsy_gr <- table_to_granges(dplyr::select(DDLPS_sample_metadata, chr=patient_id, start=biopsy_date, end=biopsy_date) %>% data.frame)
+
+
+regimen_sub <- dplyr::select(dplyr::filter(regimen,!is.na(end_date_indexed),!is.na(start_date_indexed)),chr=patient_id,start=start_date_indexed, end=end_date_indexed, Drug=agents, Drug_Class=therapy_class,Class_Type=therapy_class_group, Line_Order=regimen_sequence)
+
+
+## index <- which(is.na(regimen_sub$Line_Order))
+## regimen_sub[index,"Line_Order"] <- rank(regimen_sub[index,"end"])
+vec <- c()
+out_regimen <- data.frame(stringsAsFactors = F)
+for(i in unique(regimen_sub$chr)){
+    sub <- dplyr::filter(regimen_sub, chr==i)
+    sub_gr <- sort_gr(table_to_granges(sub))
+    sub_biopsy <- patient_biopsy_gr[which(!is.na(nearest(patient_biopsy_gr,sub_gr)))][1]
+
+    index <- unique(sub_gr[nearest(sub_gr, x=sub_biopsy)])
+
+    if(length(index) ==1 && (end(index) < start(sub_biopsy))){
+        vec <- c(vec,1)
+        sub$Tx_before_bx <- unique(index$Drug)
+        sub$Tx_class_before_bx <- unique(index$Drug_Class)
+
+    } else if (length(index)>=1 && all(end(index) < start(sub_biopsy))){
+                vec <- c(vec,2)
+        sub$Tx_before_bx <- paste0(unique(index$Drug),collapse="+")
+        sub$Tx_class_before_bx <- paste0(unique(index$Drug_Class),collapse="+")
+    } else if(all(end(sub_gr) > start(sub_biopsy)) && length(intersect_with_metadata(index,sub_biopsy))==0){
+                vec <- c(vec,3)
+                sub$Tx_before_bx <- "None"
+                sub$Tx_class_before_bx <- "Tx-Naive"
+    } else if(length(intersect_with_metadata(index,sub_biopsy))>=1) {
+
+        vec <- c(vec,4)
+        
+        sub$Tx_before_bx <- paste0(unique(index$Drug),collapse="+")
+        sub$Tx_class_before_bx <- paste0(unique(index$Drug_Class),collapse="+")
+    } else{
+        vec <- c(vec,5)
+        sub$Tx_before_bx <- "Unknown"
+        sub$Tx_class_before_bx <- "Unknown"}
+
+    out_regimen <- rbind(out_regimen, sub)
+}
+
+
+
+        }
+
+
+}
+
+
+calc_treatment_journeys <- function(cohort,treatment_lines = 5,num_groups=6,cohort_name=NULL,verbose=F, drop_untreated=TRUE)
+{
+    require(ggsankey)
+    require(dplyr)
+    require(tidyr)
+
+    list_files_dm1 <- c("regimen")
+    list_files_dm2 <- c("onco_regimen")
+
+      ############  Importing the tempus data and create the plotting dataframe
+  if (is.character(cohort)) {
+    if (verbose) {
+      print("Trying to load cohort")
+    }
+      input_td <- tryCatch({load_tempus_data(cohort, collection=NULL,
+                                   list_files=list_files_dm1)}, 
+                 error=function(e){ tryCatch({load_tempus_data(cohort, collection=NULL,
+                                                               list_files=list_files_dm2)
+                 }, error=function(f){"dud_cohort"})})
+      } else if (is.list(cohort)) {
+    if (verbose) {
+      print("Cohort already loaded, working")
+    }
+    input_td <- cohort
+      }
+
+  ####################
+
+
+  data_model_check <- calc_data_model(input_td,
+    list_tables_dm_1 = list_files_dm1,
+    list_tables_dm_2 = list_files_dm2
+  )
+
+  stopifnot(data_model_check %in% c("1.0", "2.0"))
+  ############ Define DM specific functions ##################
+  prep_treatment_journeys_dm1 <- function(input_td) {
+    regimen_table <- input_td$regimen
+    regimen_summary <- regimen_table %>%
+      dplyr::arrange(.data$patient_id, .data$regimen_rank) %>%
+      dplyr::select(.data$patient_id,
+        Rank = .data$regimen_rank, Drug_Name = .data$regimen_name, Drug_Class = .data$regimen_class,
+        Class_Group = .data$regimen_class_group
+      )
+    return(regimen_summary)
+  }
+
+  prep_treatment_journeys_dm2 <- function(input_td) {
+    regimen_table <- input_td$onco_regimen
+    regimen_summary <- regimen_table %>%
+      dplyr::arrange(.data$patient_id, .data$regimen_sequence) %>%
+      dplyr::select(.data$patient_id,
+        Rank = .data$regimen_sequence, Drug_Name = .data$agents, Drug_Class = .data$therapy_class,
+        Class_Group = .data$therapy_class_group
+      )
+    return(regimen_summary)
+  }
+
+  ##### Calling DM specific functions #####
+  if (data_model_check == "1.0") {
+    regimen_summary <- prep_treatment_journeys_dm1(input_td)
+  }
+
+  if (data_model_check == "2.0") {
+    regimen_summary <- prep_treatment_journeys_dm2(input_td)
+  }
+################################################
+########## Format for output #################
+################################################
+  regimen_summary <- regimen_summary %>%
+    dplyr::group_by(.data$patient_id) %>%
+    dplyr::mutate(Rank2 = paste0(1:length(.data$Rank), "L")) %>%
+    dplyr::ungroup() %>%
+    dplyr::group_by(.data$Rank2) %>%
+    dplyr::mutate(Drug_Name2 = forcats::fct_lump(.data$Drug_Name,
+      n = num_groups
+    )) %>%
+    dplyr::ungroup() %>%
+    dplyr::group_by(.data$Rank2) %>%
+    dplyr::mutate(Class_Group2 = forcats::fct_lump(.data$Class_Group,
+      n = num_groups
+    )) %>%
+    dplyr::ungroup()
+  regimen_summary <- regimen_summary %>%
+    dplyr::group_by(.data$patient_id) %>%
+    dplyr::arrange(.data$patient_id, .data$Rank2) %>%
+    dplyr::ungroup() %>%
+    data.frame()
+  regimen_sankey <- regimen_summary %>%
+    dplyr::select(.data$patient_id,
+      Treatment_Line = .data$Rank2, Drug = .data$Drug_Name2, Class = .data$Class_Group2
+    ) %>%
+    dplyr::ungroup()
+################################################
+########## Finalize output #################
+################################################
+
+      regimen_sankey_class <- regimen_sankey %>% tidyr::pivot_wider(
+    id_cols = .data$patient_id,
+    names_from = .data$Treatment_Line, values_from = .data$Class
+  )
+  regimen_sankey_drug <- regimen_sankey %>% tidyr::pivot_wider(
+    id_cols = .data$patient_id,
+    names_from = .data$Treatment_Line, values_from = .data$Drug
+  )
+
+    all_lines <- unique(regimen_summary$Rank2)
+  treatment_cols <- intersect(
+    paste0(1:treatment_lines, "L"),
+    all_lines
+  )
+  regimen_sankey_class_final <- regimen_sankey_class %>% ggsankey::make_long(treatment_cols)
+    regimen_sankey_drug_final <- regimen_sankey_drug %>% ggsankey::make_long(treatment_cols)
+      if (drop_untreated) {
+    regimen_sankey_class_final <- regimen_sankey_class_final %>%
+      tidyr::drop_na(.data$node)
+    regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
+      tidyr::drop_na(.data$node)
+  } else {
+    regimen_sankey_class_final <- regimen_sankey_class_final %>%
+      tidyr::replace_na(list(node = "No F/U"))
+    regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
+      tidyr::replace_na(list(node = "No F/U"))
+  }
+
+
+
+    out <- list("Drug"=as.data.frame(regimen_sankey_drug_final),"Class"=as.data.frame(regimen_sankey_class_final))
+    return(out)
+    }
+
+
+make_mmf_dm2 <- function(td){
+   variant_table <- td$onco_result_overview_gene %>%
+      # filter(is_gene_significant == 1) %>%
+      left_join(
+        td$onco_result_snv_indel_passing_filtered %>%
+          filter(variant_classification %in% c("LP", "P")) %>%
+          mutate(variant_type_code = "SHRTVRNT") %>%
+          select(patient_id, tumor_biospecimen_id, gene_symbol,
+                 variant_type_code, variant_molecular_consequence,
+                 variant_origin, variant_classification),
+        by = c("patient_id", "tumor_biospecimen_id", "gene_symbol")
+      ) %>%
+      left_join(
+        td$onco_result_cnv_gene %>%
+          # filter(copy_number != 0) %>%
+          # filter(is_significant == 1) %>%
+          mutate(variant_type_code = "CNALTER") %>%
+          select(patient_id, tumor_biospecimen_id, gene_symbol,
+                 copy_number, variant_type_code),
+        by = c("patient_id", "tumor_biospecimen_id", "gene_symbol")
+      ) %>%
+      mutate(
+        variant_type_code = coalesce(variant_type_code.x, variant_type_code.y),
+        result = case_when(
+          is.na(copy_number) ~ "Neutral",
+          copy_number < 2    ~ "Loss",
+          copy_number > 2    ~ "Gain",
+          copy_number == 2   ~ "Neutral"
+        ),
+        biospecimen_id = tumor_biospecimen_id) %>%
+      select(-variant_type_code.x, -variant_type_code.y) %>%
+      filter(
+        grepl("xT|xO|xE", assay),
+        gene_symbol %in% xt_genes
+      )
+   return(variant_table)
+}
+
+prep_oncoprint_dm1 <- function(input_td,genes_of_interest, patient_identifier="patient_id",gene_identifier="gene_canonical_name",assay_blacklist="xF",filter_germline=T, copy_number_threshold=8){
+
+        mmf <- input_td[grep("molecular_master_file", names(input_td))]
+        gene_identifier <- unique(unlist(lapply(mmf, function(x) intersect(gene_identifier,colnames(x)))))
+
+        if(is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) > 50){
+            stop("There are more than 50 unique genes in this mmf file, did you forget to set any genes of interest?")
+            } else if (is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) < 50){
+                      common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+                      mmf <- do.call("rbind", lapply(mmf, function(x) x[,common_cols]))
+                      mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) && length(genes_of_interest) <50){
+
+                                                   common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+                      mmf <- do.call("rbind", lapply(mmf, function(x) x[which(x[,gene_identifier] %in% genes_of_interest),common_cols]))
+                                                   mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest && length(genes_of_interest) > 50)) { stop("There are more than 50 specified genes of interest. Consider reducing that number and replotting")
+                                                                            }
+
+
+        colnames(mmf)[grep(paste0("^", gene_identifier, "$"), colnames(mmf))] <- "Gene"
+        if(!is.null(assay_blacklist)){
+        mmf <- dplyr::filter(mmf, !grepl(paste0(assay_blacklist,collapse="|"), assay))}
+
+
+        if (patient_identifier %in% c("patient_id", "analysis_id")) {
+      mmf_SNV <- dplyr::filter(mmf, .data$variant_type_code == "SHRTVRNT", .data$functional_impact != "B",!grepl("stream|intron|UTR",mutation_effect)) %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$mutation_effect, .data$variant_allele_freq, .data$somatic_germline)
+  } else {
+    mmf_SNV <- dplyr::filter(mmf, .data$variant_type_code == "SHRTVRNT", .data$functional_impact != "B",!grepl("stream|intron|UTR",mutation_effect)) %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, !!as.name(patient_identifier), .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$mutation_effect, .data$variant_allele_freq, .data$somatic_germline)
+  }
+  if (filter_germline) {
+    mmf_SNV <- dplyr::filter(mmf_SNV, .data$somatic_germline == "S")
+  }
+
+
+  if (patient_identifier %in% c("patient_id", "analysis_id")) {
+    mmf_CNV_ref <- dplyr::filter(mmf, .data$variant_type_code == "CNALTER") %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$somatic_germline, .data$copy_number)
+  } else {
+    mmf_CNV_ref <- dplyr::filter(mmf, .data$variant_type_code == "CNALTER") %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, !!as.name(patient_identifier), .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$result, .data$somatic_germline, .data$copy_number)
+  }
+
+  mmf_CNV_calc <- tryCatch(
+    {
+      tempusr::calc_cnv(mmf)
+    },
+    error = function(e) {
+      "Could not run TempusR::Calc_CNV"
+    }
+  )
+
+
+  if (!is.character(mmf_CNV_calc)) {
+    colnames(mmf_CNV_calc)[2] <- "Gene"
+    mmf_CNV_ref <- dplyr::left_join(dplyr::select(mmf_CNV_ref, -(.data$copy_number)), mmf_CNV_calc, by = c("analysis_id", "Gene"))
+  } else if (!is.character(mmf_CNV_calc)) {
+
+    mmf_CNV_ref <- mmf_CNV_ref %>%
+      dplyr::group_by(.data$patient_id, .data$analysis_id, .data$Gene) %>%
+      dplyr::mutate(copy_number = mean(.data$copy_number)) %>%
+      unique() %>%
+      dplyr::ungroup()
+  }
+    
+    colnames(mmf_CNV_ref)[grep(paste0("^", patient_identifier, "$"), colnames(mmf_CNV_ref))] <- "ID"
+    mmf_CNV_ref <- mmf_CNV_ref %>% group_by(ID, Gene) %>% dplyr::summarize(copy_number=mean(copy_number))
+    
+  mmf_CNV_ref <- mmf_CNV_ref %>% dplyr::mutate(Mut = dplyr::case_when(.data$copy_number == 0 ~ "HOMDEL", .data$copy_number == 1 ~ "SHALLOWDEL", .data$copy_number < copy_number_threshold & .data$copy_number > 2 ~ "WEAKAMP",.data$copy_number >= copy_number_threshold ~ "AMP"))
+
+    mmf_SNV <- mmf_SNV %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE", grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
+    colnames(mmf_SNV)[grep(paste0("^", patient_identifier, "$"), colnames(mmf_SNV))] <- "ID"
+
+        ## saveRDS(mmf_CNV_ref,"~/CNV_Ref_DM1.rds")
+        ## saveRDS(mmf_SNV,"~/SNV_Ref_DM1.rds")
+
+  mmf_int <- rbind(dplyr::select(mmf_CNV_ref, .data$ID, .data$Gene, .data$Mut), dplyr::select(mmf_SNV, .data$ID, .data$Gene, .data$Mut))
+
+
+
+
+     mmf_out <- mmf_int %>%
+    dplyr::group_by(.data$ID, .data$Gene) %>%
+    dplyr::mutate(Combo_Mut = paste0(sort(unique(.data$Mut)), collapse = ";")) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(.data$ID, .data$Gene, .data$Combo_Mut) %>%
+    unique() %>%
+    data.frame()
+
+
+
+  mmf_final <- tidyr::pivot_wider(mmf_out, names_from = .data$ID, id_cols = .data$Gene, values_from = .data$Combo_Mut) %>% data.frame()
+
+  rownames(mmf_final) <- mmf_final[, 1]
+    mmf_final[, 1] <- NULL
+
+  mmf_final <- as.matrix(mmf_final)
+  colnames(mmf_final) <- gsub("^X","", gsub("\\.","-",colnames(mmf_final)))
+
+    return(mmf_final)
+        }
+
+
+import_cohort_characterization <- function(source_dir="gs://pathos-research/temp/Cohort_Characterization",destination_dir="~/",skip_download=T){
+
+    if(!skip_download){   suppressMessages(system(paste0("gsutil -m cp -r ", source_dir, " ", destination_dir),ignore.stdout=T))
+    }
+
+    file_list <- list.files(paste0(destination_dir,"Cohort_Characterization/"),full.names=T)
+    names(file_list) <- unlist(lapply(file_list, function(x) last(unlist(strsplit(x,"/")))))
+
+
+
+
+
+    input_files <- lapply(names(file_list), function(x) list.files(file_list[[x]], recursive=T,full.names=T))
+    names(input_files) <- names(file_list)
+
+ 
+    cohort_characterization <- list()
+
+    for(i in names(input_files)[1:3]){
+        common_cols <- Reduce("intersect", lapply(input_files[[i]],function(x) colnames(readRDS(x))))
+     int <- do.call("rbind", lapply(input_files[[i]],function(x) readRDS(x)[,common_cols]))
+     cohort_characterization[[i]] <- int
+
+ }
+
+
+    int_drug <- do.call("rbind",lapply(grep("Drug",input_files[[4]],value=T), function(x) cbind(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Drug_characterization.rds","",last(unlist(strsplit(x,"treatments/")))))))
+    colnames(int_drug)[ncol(int_drug)] <- "Cohort"
+    int_drug$Info <- "Drug"
+    cohort_characterization[["Drug"]] <- int_drug
+
+
+    int_class <- do.call("rbind",lapply(grep("Class",input_files[[4]],value=T), function(x) data.frame(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Class_characterization.rds","",x))))
+    colnames(int_class)[ncol(int_class)] <- "Cohort"
+    int_class$Info <- "Class"
+    cohort_characterization[["Class"]] <- int_class
+
+
+    for(i in names(cohort_characterization)){
+        sub <- cohort_characterization[[i]]
+
+        sub$Cohort <- gsub("/","_",sub$Cohort)
+        cohort_characterization[[i]] <- sub}
+    return(cohort_characterization)
+
+    }
+
+import_quantiseq <- function(output) {
+    output <- read.delim(output,header=T,sep='\t')
+    output$Sample <- gsub("\\.","-",output$Sample)
+    output$Sample <- gsub("^X","",output$Sample)
+
+    return(output)
+    }
