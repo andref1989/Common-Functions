@@ -235,7 +235,7 @@ intersect_with_metadata <- function(gr1,gr2, ignore.strand=FALSE){
 setdiff_with_metadata <- function(gr1,gr2){ require(GenomicRanges)
                                             int <- findOverlaps(gr1,gr2); out <- gr1[setdiff(1:length(gr1),unique(int@from)),]; return(out)}
 
-Collapse_gr_keep_metadata <- function(gr){
+collapse_gr_keep_metadata <- function(gr){
     require(GenomicRanges)
     reduced <- reduce(gr)
     final_gr <- reduced
@@ -4704,9 +4704,9 @@ table_to_granges_bedpe <- function(table,ID_col=NULL,ranges_1=1:3,ranges_2=4:6,s
 }
 
 
-sort_gr <- function(gr){
+sort_gr <- function(gr,...){
     require(GenomicRanges)
-    gr <- sort(sortSeqlevels(gr))
+    gr <- sort(sortSeqlevels(gr),...)
 
     return(gr)}
 
@@ -12189,6 +12189,8 @@ calculate_outcomes_gsea <- function(module_membership,
 }
 
 
+
+
 identify_modules_from_KD <- function(directory="result_012",gene="MDM2",to_file=TRUE,test=FALSE){
     library(googleCloudStorageR)
     library(gargle)
@@ -12615,7 +12617,7 @@ import_and_filter_KD_files <- function(directory,gene=NULL){
     for(i in file_list){
 
         kd_file <- i
-        KD_int <- dplyr::filter(read.csv(paste0(directory,kd_file)), significant ==TRUE,node %in% target_node) %>% dplyr::select(network,node,signature,padj)
+        KD_int <- dplyr::filter(vroom::vroom(paste0(directory,kd_file),delim=",", show_col_types=F), significant ==TRUE,node %in% target_node) %>% dplyr::select(network,node,signature,padj)
 
         KD_int$Gene <- translate_ENSMBL_to_HGNC(KD_int$node)
 
@@ -12652,8 +12654,9 @@ calc_GSEA <- function(de_stat,
 }
 
 
-    ANF_rank <- function(vec){
-    rank <- (length(vec)+1)-rank(vec)
+ANF_rank <- function(vec){
+    vec[is.na(vec)] <- 0
+    rank <- (length(vec)+1)-rank(vec,na.last=F)
 
     return(rank)}
 
@@ -12994,6 +12997,79 @@ characterize_cohort <- function(cohort_path,cohort_name,assay_blacklist="xF"){
 
     return(out)
     } else{ print(paste0("Could not import Tempus data for ",cohort_name))}}
+
+
+calc_immune_infiltration <- function(cohort, cohort_name,verbose=F){
+  
+  require(dplyr)
+  require(tidyr)
+  library(diptest)
+  
+  list_files_dm1 <- c("g_infiltration","g_tmb","g_msi")
+  list_files_dm2 <- c("onco_result_immune_infiltration","onco_result_tmb_annotated","onco_result_msi_annotated")
+  
+  ############  Importing the tempus data and create the plotting dataframe
+  if (is.character(cohort)) {
+    if (verbose) {
+      print("Trying to load cohort")
+    }
+    input_td <- tryCatch({load_tempus_data(cohort, collection=NULL,
+                                           list_files=list_files_dm1)},
+                         error=function(e){ tryCatch({load_tempus_data(cohort, collection=NULL,
+                                                                       list_files=list_files_dm2)
+                         }, error=function(f){"dud_cohort"})})
+  } else if (is.list(cohort)) {
+    if (verbose) {
+      print("Cohort already loaded, working")
+    }
+    input_td <- cohort
+  }
+  
+  ####################
+  
+  
+  data_model_check <- calc_data_model(input_td,
+                                      list_tables_dm_1 = list_files_dm1,
+                                      list_tables_dm_2 = list_files_dm2
+  )
+  
+  stopifnot(data_model_check %in% c("1.0", "2.0"))
+  ############ Define DM specific functions ##################
+  prep_infiltration_dm1 <- function(input_td) {
+    infiltration <- Reduce("left_join", lapply(input_td[list_files_dm1], function(x) unique(x[intersect(c("patient_id", "tmb_v1","percentile","msi_status","est_immune_cells","est_b_cells","est_cd4_cells","est_cd8_cells", "est_mac_cells","est_nk_cells"), colnames(x))])))
+    
+    
+    return(infiltration)
+  }
+  
+  prep_infiltration_dm2 <- function(input_td) {
+    infiltration <- Reduce("left_join", lapply(input_td[list_files_dm2], function(x) unique(x[intersect(c("patient_id", "tmb_result_harmonized_forward_xt","msi_status","b_cells_fraction_of_immune_decimal","cd4_cells_fraction_of_immune_decimal","cd8_cells_fraction_of_immune_decimal","macrophages_fraction_of_immune_decimal","nk_cells_fraction_of_immune_decimal","immune_cells_fraction_of_isolate_decimal"), colnames(x))])))
+    colnames(infiltration) <- gsub("_cells_fraction_of_immune_decimal|_fraction_of_immune_decimal|_fraction_of_isolate_decimal","_cells", colnames(infiltration))
+    colnames(infiltration)[grep("_cells",colnames(infiltration))] <- paste0("est_",colnames(infiltration)[grep("_cells",colnames(infiltration))])
+    colnames(infiltration) <- gsub("_cells_cells","_cells",colnames(infiltration))
+    colnames(infiltration) <- gsub("est_macrophages","est_mac",colnames(infiltration))   
+    colnames(infiltration)[grep("tmb_result",colnames(infiltration))] <- "tmb_v1"
+    infiltration$percentile <- round(100*get_quantile(infiltration$tmb_v1))
+    
+    return(infiltration)
+  }
+  
+
+  
+  ##### Calling DM specific functions #####
+  if (data_model_check == "1.0") {
+    infiltration <- prep_infiltration_dm1(input_td)
+  }
+  
+  if (data_model_check == "2.0") {
+    infiltration <- prep_infiltration_dm2(input_td)
+  }
+  
+  infiltration$Cohort <- cohort_name
+  infiltration <- dplyr::select(infiltration,-patient_id)
+  return(infiltration[])
+}
+
 
 
 calc_tx_at_bx <- function(data_cohort=NULL,clinical_timeline_output=NULL){
@@ -13338,25 +13414,34 @@ make_mmf_dm2 <- function(td){
    return(variant_table)
 }
 
-prep_oncoprint_dm1 <- function(input_td,genes_of_interest, patient_identifier="patient_id",gene_identifier="gene_canonical_name",assay_blacklist="xF",filter_germline=T, copy_number_threshold=8){
+prep_oncoprint_dm1 <- function(input_td,genes_of_interest=NULL, patient_identifier="patient_id",gene_identifier="gene_canonical_name",assay_blacklist="xF",filter_germline=T, copy_number_threshold=8){
 
-        mmf <- input_td[grep("molecular_master_file", names(input_td))]
-        gene_identifier <- unique(unlist(lapply(mmf, function(x) intersect(gene_identifier,colnames(x)))))
+    mmf <- input_td[grep("molecular_master_file", names(input_td))]
+    gene_identifier <- unique(unlist(lapply(mmf, function(x) intersect(gene_identifier,colnames(x)))))
 
-        if(is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) > 50){
-            stop("There are more than 50 unique genes in this mmf file, did you forget to set any genes of interest?")
-            } else if (is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) < 50){
-                      common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+    ## mmf$Gene <- mmf[,gene_identifier]
+
+    if(is.null(genes_of_interest) & length(unique(mmf[[1]][,gene_identifier])) > 50){
+                    stop("There are more than 50 unique genes in this mmf file, did you forget to set any genes of interest?")
+
+        } else if (is.null(genes_of_interest) & length(unique(mmf[[1]][,gene_identifier])) < 50){
+        
+                common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+
                       mmf <- do.call("rbind", lapply(mmf, function(x) x[,common_cols]))
-                      mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) && length(genes_of_interest) <50){
-
+            mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) & length(genes_of_interest) <50){
+        
                                                    common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
                       mmf <- do.call("rbind", lapply(mmf, function(x) x[which(x[,gene_identifier] %in% genes_of_interest),common_cols]))
-                                                   mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest && length(genes_of_interest) > 50)) { stop("There are more than 50 specified genes of interest. Consider reducing that number and replotting")
+                                                   mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) & length(genes_of_interest) > 50) { stop("There are more than 50 specified genes of interest. Consider reducing that number and replotting")
                                                                             }
+mmf <- do.call("rbind",mmf)
+
+    colnames(mmf)[grep(paste0("^", gene_identifier, "$"), colnames(mmf))] <- "Gene"
+    mmf <- dplyr::filter(mmf, Gene %in% genes_of_interest)
 
 
-        colnames(mmf)[grep(paste0("^", gene_identifier, "$"), colnames(mmf))] <- "Gene"
+##    mmf <- dplyr::filter(mmf,Gene %in% genes_of_interest)
         if(!is.null(assay_blacklist)){
         mmf <- dplyr::filter(mmf, !grepl(paste0(assay_blacklist,collapse="|"), assay))}
 
@@ -13441,8 +13526,119 @@ prep_oncoprint_dm1 <- function(input_td,genes_of_interest, patient_identifier="p
         }
 
 
+prep_oncoprint_dm1_simple <- function(input_td,genes_of_interest=NULL, patient_identifier="patient_id",gene_identifier="gene_canonical_name",assay_blacklist="xF",filter_germline=T, copy_number_threshold=8){
+
+    mmf <- input_td[grep("molecular_master_file", names(input_td))]
+    gene_identifier <- unique(unlist(lapply(mmf, function(x) intersect(gene_identifier,colnames(x)))))
+
+    ## mmf$Gene <- mmf[,gene_identifier]
+
+    if(!is.null(genes_of_interest)){
+
+        common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+        str(common_cols)
+        mmf <- do.call("rbind", lapply(mmf, function(x) x[,common_cols]))
+        mmf <- as.data.frame(mmf)
+        mmf <- mmf[which(mmf[,gene_identifier] %in% genes_of_interest),]
+    } else if (is.null(genes_of_interest)){
+
+        common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
+
+        mmf <- do.call("rbind", lapply(mmf, function(x) x[,common_cols]))
+        mmf <- as.data.frame(mmf)} 
+
+    colnames(mmf)[grep(paste0("^", gene_identifier, "$"), colnames(mmf))] <- "Gene"
+
+
+##    mmf <- dplyr::filter(mmf,Gene %in% genes_of_interest)
+        if(!is.null(assay_blacklist)){
+        mmf <- dplyr::filter(mmf, !grepl(paste0(assay_blacklist,collapse="|"), assay))}
+
+
+        if (patient_identifier %in% c("patient_id", "analysis_id")) {
+      mmf_SNV <- dplyr::filter(mmf, .data$variant_type_code == "SHRTVRNT", .data$functional_impact != "B",!grepl("stream|intron|UTR",mutation_effect)) %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$mutation_effect, .data$variant_allele_freq, .data$somatic_germline)
+  } else {
+    mmf_SNV <- dplyr::filter(mmf, .data$variant_type_code == "SHRTVRNT", .data$functional_impact != "B",!grepl("stream|intron|UTR",mutation_effect)) %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, !!as.name(patient_identifier), .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$mutation_effect, .data$variant_allele_freq, .data$somatic_germline)
+  }
+  if (filter_germline) {
+    mmf_SNV <- dplyr::filter(mmf_SNV, .data$somatic_germline == "S")
+  }
+
+
+  if (patient_identifier %in% c("patient_id", "analysis_id")) {
+    mmf_CNV_ref <- dplyr::filter(mmf, .data$variant_type_code == "CNALTER") %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$somatic_germline, .data$copy_number)
+  } else {
+    mmf_CNV_ref <- dplyr::filter(mmf, .data$variant_type_code == "CNALTER") %>%
+      dplyr::select(.data$patient_id, .data$analysis_id, !!as.name(patient_identifier), .data$Gene, .data$variant_type_code, .data$result, .data$functional_impact, .data$result, .data$somatic_germline, .data$copy_number)
+  }
+
+  mmf_CNV_calc <- tryCatch(
+    {
+      tempusr::calc_cnv(mmf)
+    },
+    error = function(e) {
+      "Could not run TempusR::Calc_CNV"
+    }
+  )
+
+
+  if (!is.character(mmf_CNV_calc)) {
+    colnames(mmf_CNV_calc)[2] <- "Gene"
+    mmf_CNV_ref <- dplyr::left_join(dplyr::select(mmf_CNV_ref, -(.data$copy_number)), mmf_CNV_calc, by = c("analysis_id", "Gene"))
+  } else if (!is.character(mmf_CNV_calc)) {
+
+    mmf_CNV_ref <- mmf_CNV_ref %>%
+      dplyr::group_by(.data$patient_id, .data$analysis_id, .data$Gene) %>%
+      dplyr::mutate(copy_number = mean(.data$copy_number)) %>%
+      unique() %>%
+      dplyr::ungroup()
+  }
+    
+    colnames(mmf_CNV_ref)[grep(paste0("^", patient_identifier, "$"), colnames(mmf_CNV_ref))] <- "ID"
+    mmf_CNV_ref <- mmf_CNV_ref %>% group_by(ID, Gene) %>% dplyr::summarize(copy_number=mean(copy_number))
+    
+  mmf_CNV_ref <- mmf_CNV_ref %>% dplyr::mutate(Mut = dplyr::case_when(.data$copy_number == 0 ~ "HOMDEL", .data$copy_number == 1 ~ "SHALLOWDEL", .data$copy_number < copy_number_threshold & .data$copy_number > 2 ~ "WEAKAMP",.data$copy_number >= copy_number_threshold ~ "AMP"))
+
+    mmf_SNV <- mmf_SNV %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE", grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
+    colnames(mmf_SNV)[grep(paste0("^", patient_identifier, "$"), colnames(mmf_SNV))] <- "ID"
+
+        ## saveRDS(mmf_CNV_ref,"~/CNV_Ref_DM1.rds")
+        ## saveRDS(mmf_SNV,"~/SNV_Ref_DM1.rds")
+
+  mmf_int <- rbind(dplyr::select(mmf_CNV_ref, .data$ID, .data$Gene, .data$Mut), dplyr::select(mmf_SNV, .data$ID, .data$Gene, .data$Mut))
+
+
+
+
+     mmf_out <- mmf_int %>%
+    dplyr::group_by(.data$ID, .data$Gene) %>%
+    dplyr::mutate(Combo_Mut = paste0(sort(unique(.data$Mut)), collapse = ";")) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(.data$ID, .data$Gene, .data$Combo_Mut) %>%
+    unique() %>%
+    data.frame()
+
+
+
+  mmf_final <- tidyr::pivot_wider(mmf_out, names_from = .data$ID, id_cols = .data$Gene, values_from = .data$Combo_Mut) %>% data.frame()
+
+  rownames(mmf_final) <- mmf_final[, 1]
+    mmf_final[, 1] <- NULL
+
+  mmf_final <- as.matrix(mmf_final)
+  colnames(mmf_final) <- gsub("^X","", gsub("\\.","-",colnames(mmf_final)))
+
+    return(mmf_final)
+        }
+
+
+
 import_cohort_characterization <- function(source_dir="gs://pathos-research/temp/Cohort_Characterization",destination_dir="~/",skip_download=T){
 
+    library(dplyr)
     if(!skip_download){   suppressMessages(system(paste0("gsutil -m cp -r ", source_dir, " ", destination_dir),ignore.stdout=T))
     }
 
@@ -13458,8 +13654,9 @@ import_cohort_characterization <- function(source_dir="gs://pathos-research/temp
 
  
     cohort_characterization <- list()
+    
 
-    for(i in names(input_files)[1:3]){
+    for(i in names(input_files)[grep("expression|mutations", names(input_files))]){
         common_cols <- Reduce("intersect", lapply(input_files[[i]],function(x) colnames(readRDS(x))))
      int <- do.call("rbind", lapply(input_files[[i]],function(x) readRDS(x)[,common_cols]))
      cohort_characterization[[i]] <- int
@@ -13467,16 +13664,22 @@ import_cohort_characterization <- function(source_dir="gs://pathos-research/temp
  }
 
 
-    int_drug <- do.call("rbind",lapply(grep("Drug",input_files[[4]],value=T), function(x) cbind(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Drug_characterization.rds","",last(unlist(strsplit(x,"treatments/")))))))
+    int_drug <- do.call("rbind",lapply(grep("Drug",input_files[["treatments"]],value=T), function(x) cbind(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Drug_characterization.rds","",last(unlist(strsplit(x,"treatments/")))))))
     colnames(int_drug)[ncol(int_drug)] <- "Cohort"
     int_drug$Info <- "Drug"
     cohort_characterization[["Drug"]] <- int_drug
 
 
-    int_class <- do.call("rbind",lapply(grep("Class",input_files[[4]],value=T), function(x) data.frame(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Class_characterization.rds","",x))))
+    int_class <- do.call("rbind",lapply(grep("Class",input_files[["treatments"]],value=T), function(x) data.frame(readRDS(x),gsub("/Users/forbesa/Cohort_Characterization//treatments/|_Class_characterization.rds","",x))))
     colnames(int_class)[ncol(int_class)] <- "Cohort"
     int_class$Info <- "Class"
     cohort_characterization[["Class"]] <- int_class
+
+    int_immune <- lapply(grep("immune",input_files[["immune_infiltration"]],value=T), function(x) readRDS(x))
+    common_cols <- Reduce("intersect", lapply(int_immune, function(x) colnames(x)))
+    int_immune <- do.call("rbind",lapply(int_immune, function(x) x[common_cols]))
+    int_immune$Info <- "Immune_Infiltration"
+    cohort_characterization[["Immune"]] <- int_immune
 
 
     for(i in names(cohort_characterization)){
@@ -13495,3 +13698,86 @@ import_quantiseq <- function(output) {
 
     return(output)
     }
+
+
+calc_os_enrichment <- function(os_info,module_info,network_name){
+    os_info <-  os_info %>%
+      dplyr::mutate(effect = dplyr::case_when(estimate > 1 & adj.p < 0.05 ~ "worse_OS",
+                                              estimate < 1 & adj.p < 0.05 ~ "better_OS",
+                                              TRUE ~ "no_effect")) %>%
+      dplyr::select(ensembl_gene_id,estimate,
+                    effect,hgnc_symbol) %>% left_join(module_info)
+   
+
+
+          ### Summarize modules
+          module_os_summary <- left_join(dplyr::select(os_info, Gene=ensembl_gene_id, hgnc_symbol,estimate),
+                                         dplyr::select(module_info, Gene=ensembl_gene_id,module_color,module_label),by="Gene") %>% group_by(module_color) %>% dplyr::mutate(Mean_Estimate=mean(estimate)) %>% dplyr::select(module=module_color,Mean_Estimate) %>% dplyr::mutate(Mean_Effect = dplyr::case_when(Mean_Estimate > 1 ~ "worse_OS",
+                                              Mean_Estimate < 1 ~ "better_OS",
+                                              TRUE ~ "no_effect")) %>% ungroup %>% unique
+
+          module_os_summary$network <- network_name
+
+          ##str(module_os_summary)
+
+    list_modules <- unique(os_info$module_color)
+
+    results_os <- data.frame()
+    for (index_module in list_modules) {
+
+      # get the contingency table
+
+      contingency <- os_info |>
+        dplyr::mutate(in_module = dplyr::case_when(module_color == index_module ~ "in_module",
+                                                   TRUE ~ "not_in_module")) |>
+        dplyr::select(ensembl_gene_id,
+                      in_module) |>
+        dplyr::inner_join(os_info,
+                          by = "ensembl_gene_id") |>
+        dplyr::count(in_module,
+                     effect,
+                     name = "num_genes") |>
+        dplyr::full_join(expand.grid(in_module = c("in_module",
+                                                   "not_in_module"),
+                                     effect = c("worse_OS",
+                                                "better_OS",
+                                                "no_effect")),
+                         by = c("in_module",
+                                "effect")) |>
+        dplyr::mutate(num_genes = tidyr::replace_na(num_genes,
+                                                    0)) |>
+        tidyr::pivot_wider(names_from = "effect",
+                           values_from = "num_genes") |>
+        dplyr::arrange(dplyr::desc(in_module)) |>
+        tibble::column_to_rownames("in_module") 
+
+        contingency_worse <- dplyr::select(contingency,no_effect,worse_OS)
+        contingency_better <- dplyr::select(contingency,no_effect,better_OS)
+
+##        str(contingency_better)
+##        str(contingency_worse)
+      # calculate fishers exact
+
+        results_os_temp_worse <- fisher.test(contingency_worse,alternative = "greater")
+        results_os_temp_better <- fisher.test(contingency_better,alternative = "greater")
+
+        pval_out <- c(results_os_temp_worse$p.value,results_os_temp_better$p.value)
+        estimate_out <- c(results_os_temp_worse$estimate,results_os_temp_better$estimate)
+      # save
+
+      results_os <- dplyr::bind_rows(results_os,
+                                     data.frame(network = network_name,
+                                                module = index_module,
+                                                odds_ratio = estimate_out,
+                                                p_value = pval_out,os_effect=c("worse","better")))}
+
+
+
+    return(results_os)
+    }
+
+pval_translator <- function(pval){
+    map_out <- ifelse(pval <=0.001,"***",ifelse(pval <=0.01,"**",ifelse(pval <=0.05,"*", ifelse(pval <=0.1,".", ""))))
+    return(map_out)}
+
+

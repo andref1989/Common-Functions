@@ -121,7 +121,7 @@ plot_tempus_oncoprint <- function(data_cohort, genes_of_interest=NULL,patient_id
 
   mmf_CNV_ref <- mmf_CNV_ref %>% dplyr::mutate(Mut = dplyr::case_when(.data$copy_number == 0 ~ "HOMDEL", .data$copy_number == 1 ~ "SHALLOWDEL", .data$copy_number < copy_number_threshold & .data$copy_number > 2 ~ "WEAKAMP",.data$copy_number >= copy_number_threshold ~ "AMP"))
 
-  mmf_SNV <- mmf_SNV %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE"),grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER")
+  mmf_SNV <- mmf_SNV %>% dplyr::mutate(Mut = dplyr::case_when(grepl("stop", .data$mutation_effect) ~ "TRUNC", grepl("missense", .data$mutation_effect) ~ "MISSENSE",grepl("splice", .data$mutation_effect) ~ "SPLICE",.default="OTHER"))
 
         ## saveRDS(mmf_CNV_ref,"~/CNV_Ref_DM1.rds")
         ## saveRDS(mmf_SNV,"~/SNV_Ref_DM1.rds")

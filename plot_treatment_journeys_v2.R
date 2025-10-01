@@ -10,6 +10,7 @@
 #' @param show_legend Whether to show the color legend for the plot or not.
 #' @param sankey_type Type of plot to produce ("alluvial","sankey") default will be alluvial
 #' @param verbose whether you want progress information (string)
+#' @param show_label Whether to include the drug/class labels in the plot (Boolean)
 #'
 #' @return ggplot object if plot_option is set to "Drug" or "Class", Two figures if set to "Both"
 #' @note Any filtering or other grouping you wish to perform need to be done before passing the regimen table. Facetting has not been tested and likely will not work. Trying checks again and again and again... seriously will this ever work?? Probably not.
@@ -29,11 +30,11 @@
 #' )
 #' }
 #'
-plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classes = 6,
+plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classes = 5,
                                     num_drug_names = 5, drop_untreated = FALSE, plot_option = c(
                                       "Drug",
                                       "Class", "Both"
-                                    ), title = NULL, show_legend = FALSE, sankey_type = "alluvial", verbose = F) {
+                                    ), title = NULL, show_legend = FALSE, sankey_type = "alluvial", verbose = F,show_label=TRUE) {
   #### Defining what we're going to plot
   if (length(plot_option) > 1) {
     plot_option <- "Both"
@@ -99,6 +100,8 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
   if (data_model_check == "2.0") {
     regimen_summary <- prep_treatment_journeys_dm2(input_td)
   }
+    regimen_summary$Drug_Name <- gsub(" \\+ "," \\+ \n", regimen_summary$Drug_Name)
+    regimen_summary$Class_Group <- gsub(" \\+ "," \\+ \n", regimen_summary$Class_Group)
   ################################################
 
   ################ Format for plotting #################
@@ -179,7 +182,8 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
     ))))
 
     if (plot_option == "Drug") {
-    if (sankey_type == "alluvial") {
+        if (sankey_type == "alluvial") {
+            if(show_label){
       p2 <- ggplot2::ggplot(regimen_sankey_drug_final, ggplot2::aes(
         x = .data$x, next_x = .data$next_x,
         node = .data$node, next_node = .data$next_node, label = .data$node,
@@ -197,9 +201,25 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
         ggplot2::labs(title = title2) +
         ggplot2::xlab("Treatment Line") +
         ggplot2::ylab("Num. Patients") +
-        guide_name
+      guide_name} else{
+                          p2 <- ggplot2::ggplot(regimen_sankey_drug_final, ggplot2::aes(
+        x = .data$x, next_x = .data$next_x,
+        node = .data$node, next_node = .data$next_node, label = .data$node,
+        fill = as.factor(.data$node)
+      )) +
+        ggsankey::geom_alluvial(
+          show.legend = show_legend,
+          node.color = 1
+        ) +
+        sankey_theme +
+        ggplot2::labs(title = title2) +
+        ggplot2::xlab("Treatment Line") +
+        ggplot2::ylab("Num. Patients") +
+      guide_name}
+
       return(p2)
-    } else if (sankey_type == "sankey") {
+        } else if (sankey_type == "sankey") {
+            if(show_label){
       p2 <- ggplot2::ggplot(regimen_sankey_drug_final, ggplot2::aes(
         x = .data$x, next_x = .data$next_x,
         node = .data$node, next_node = .data$next_node, label = .data$node,
@@ -217,11 +237,27 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
         ggplot2::labs(title = title2) +
         ggplot2::xlab("Treatment Line") +
         ggplot2::ylab("Num. Patients") +
-        guide_name
+      guide_name} else{
+                          p2 <- ggplot2::ggplot(regimen_sankey_drug_final, ggplot2::aes(
+        x = .data$x, next_x = .data$next_x,
+        node = .data$node, next_node = .data$next_node, label = .data$node,
+        fill = as.factor(.data$node)
+      )) +
+        ggsankey::geom_sankey(
+          show.legend = show_legend,
+          node.color = 1
+        ) +
+        sankey_theme +
+        ggplot2::labs(title = title2) +
+        ggplot2::xlab("Treatment Line") +
+        ggplot2::ylab("Num. Patients") +
+        guide_name}
+}
       return(p2)
-    }
+
   } else if (plot_option == "Class") {
-    if (sankey_type == "alluvial") {
+      if (sankey_type == "alluvial") {
+          if(show_label){
       p <- ggplot2::ggplot(regimen_sankey_class_final, ggplot2::aes(
         x = .data$x, next_x = .data$next_x,
         node = .data$node, next_node = .data$next_node, label = .data$node,
@@ -239,9 +275,24 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
         ggplot2::labs(title = title1) +
         ggplot2::xlab("Treatment Line") +
         ggplot2::ylab("Num. Patients") +
-        guide_name
+      guide_name} else{
+      p <- ggplot2::ggplot(regimen_sankey_class_final, ggplot2::aes(
+        x = .data$x, next_x = .data$next_x,
+        node = .data$node, next_node = .data$next_node, label = .data$node,
+        fill = as.factor(.data$node)
+      )) +
+        ggsankey::geom_alluvial(
+          show.legend = show_legend,
+          node.color = 1
+        ) +
+        sankey_theme +
+        ggplot2::labs(title = title1) +
+        ggplot2::xlab("Treatment Line") +
+        ggplot2::ylab("Num. Patients") +
+      guide_name}
       return(p)
-    } else if (sankey_type == "sankey") {
+      } else if (sankey_type == "sankey") {
+                 if(show_label){
       p <- ggplot2::ggplot(regimen_sankey_class_final, ggplot2::aes(
         x = .data$x, next_x = .data$next_x,
         node = .data$node, next_node = .data$next_node, label = .data$node,
@@ -259,9 +310,25 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
         ggplot2::labs(title = title1) +
         ggplot2::xlab("Treatment Line") +
         ggplot2::ylab("Num. Patients") +
-        guide_name
+      guide_name} else{
+      p <- ggplot2::ggplot(regimen_sankey_class_final, ggplot2::aes(
+        x = .data$x, next_x = .data$next_x,
+        node = .data$node, next_node = .data$next_node, label = .data$node,
+        fill = as.factor(.data$node)
+      )) +
+        ggsankey::geom_sankey(
+          show.legend = show_legend,
+          node.color = 1
+        ) +
+        sankey_theme +
+        ggplot2::labs(title = title1) +
+        ggplot2::xlab("Treatment Line") +
+        ggplot2::ylab("Num. Patients") +
+      guide_name
+
+                    }
       return(p)
-    }
+
   } else if (plot_option == "Both") {
     if (sankey_type == "alluvial") {
       p <- ggplot2::ggplot(regimen_sankey_class_final, ggplot2::aes(
@@ -346,4 +413,4 @@ plot_treatment_journeys <- function(cohort, treatment_lines = 5, num_drug_classe
     print("Not a valid plotting option")
     stop()
   }
-}
+}}
