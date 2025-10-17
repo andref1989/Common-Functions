@@ -1,4 +1,4 @@
-identify_modules_from_KD <- function(directory="result_012",gene="MDM2",to_file=TRUE,test=FALSE){
+identify_modules_from_KD <- function(directory="result_012",Network=NULL,gene="MDM2",to_file=TRUE,test=FALSE){
     library(googleCloudStorageR)
     library(gargle)
     output_list <- list()
@@ -33,7 +33,8 @@ networks <- googleCloudStorageR::gcs_list_objects(bucket = "pathos-research-resu
                                                   prefix = sub_directory)
 
 # determine name of the network
-## str(networks)
+    ## str(networks)
+
 networks <- networks |>
   dplyr::mutate(network = stringr::str_split_i(name,
                                                "\\/",
@@ -41,12 +42,13 @@ networks <- networks |>
   dplyr::select(network) |>
   dplyr::distinct()
 
-# exclude CCLE networks
+#### exclude CCLE networks
 
+    if(is.null(Network)){
 networks <- networks |>
   dplyr::filter(network != "CCLE")
 
-
+} else{ networks <- dplyr::filter(networks, network!="CCLE") %>% dplyr::filter(grepl(Network, network)|network==Network)}
 
 #### determine which networks have a BN ####
     networks <- dplyr::filter(networks, grepl("[0-9]{2}Q[0-9]",network))
