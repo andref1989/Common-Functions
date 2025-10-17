@@ -48,7 +48,7 @@ networks <- networks |>
 networks <- networks |>
   dplyr::filter(network != "CCLE")
 
-} else{ networks <- dplyr::filter(networks, grepl(Network, network)|network==Network)}
+} else{ networks <- dplyr::filter(networks, network!="CCLE") %>% dplyr::filter(grepl(Network, network)|network==Network)}
 
 #### determine which networks have a BN ####
     networks <- dplyr::filter(networks, grepl("[0-9]{2}Q[0-9]",network))
