@@ -109,19 +109,40 @@ require(tidyr)
     paste0(1:treatment_lines, "L"),
     all_lines
   )
-  regimen_sankey_class_final <- regimen_sankey_class %>% ggsankey::make_long(treatment_cols)
+    regimen_sankey_class_final <- regimen_sankey_class %>% ggsankey::make_long(treatment_cols)
     regimen_sankey_drug_final <- regimen_sankey_drug %>% ggsankey::make_long(treatment_cols)
-      if (drop_untreated) {
-    regimen_sankey_class_final <- regimen_sankey_class_final %>%
-      tidyr::drop_na(.data$node)
-    regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
-      tidyr::drop_na(.data$node)
-  } else {
-    regimen_sankey_class_final <- regimen_sankey_class_final %>%
-      tidyr::replace_na(list(node = "No F/U"))
-    regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
-      tidyr::replace_na(list(node = "No F/U"))
-  }
+
+
+  ##   if (drop_untreated) {
+  ##   regimen_sankey_class_final <- regimen_sankey_class_final %>%
+  ##     tidyr::drop_na(.data$node)
+  ##   regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
+  ##     tidyr::drop_na(.data$node)
+  ## } else {
+  ##   regimen_sankey_class_final <- regimen_sankey_class_final %>%
+  ##     tidyr::replace_na(list(node = "No F/U"))
+  ##   regimen_sankey_drug_final <- regimen_sankey_drug_final %>%
+  ##     tidyr::replace_na(list(node = "No F/U"))
+  ## }
+    if(drop_untreated){
+        regimen_sankey_class_final <- regimen_sankey_class_final %>% drop_na(node)
+
+        regimen_sankey_drug_final <- regimen_sankey_drug_final %>% drop_na(node)
+
+    } else {
+
+        drop_index_class <- intersect(which(!is.na(regimen_sankey_class_final$node)),which(is.na(regimen_sankey_class_final$next_node)))
+        regimen_sankey_class_final$next_node[drop_index_class] <- "No F/U"
+        for(i in drop_index_class){ check <- as.character(regimen_sankey_class_final$x[i]) > as.character(regimen_sankey_class_final$x[i+1])
+            if(!check){ regimen_sankey_class_final$node[i+1] <-"No F/U"}}
+        regimen_sankey_class_final <- regimen_sankey_class_final %>% tidyr::drop_na(.data$node)
+
+                drop_index_drug <- intersect(which(!is.na(regimen_sankey_drug_final$node)),which(is.na(regimen_sankey_drug_final$next_node)))
+        regimen_sankey_drug_final$next_node[drop_index_drug] <- "No F/U"
+        for(i in drop_index_drug){ check <- as.character(regimen_sankey_drug_final$x[i]) > as.character(regimen_sankey_drug_final$x[i+1])
+            if(!check){ regimen_sankey_drug_final$node[i+1] <-"No F/U"}}
+        regimen_sankey_drug_final <- regimen_sankey_drug_final %>% tidyr::drop_na(.data$node)
+                                                            }
 
 
 

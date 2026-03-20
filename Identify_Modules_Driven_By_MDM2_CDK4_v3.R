@@ -1,4 +1,4 @@
-identify_modules_from_KD <- function(directory="result_012",Network=NULL,gene="MDM2",to_file=TRUE,test=FALSE,project_dir="project_0044"){
+identify_modules_from_KD_nebula <- function(directory="result_001/TEST",Network=NULL,gene="TP53",to_file=TRUE,test=FALSE,project_dir="project_0121"){
     library(googleCloudStorageR)
     library(gargle)
     output_list <- list()
@@ -21,7 +21,7 @@ gene_of_interest_ensembl_gene_id <- tempusr::gene_annotation |>
 
 
     p44_result_version <- directory
-    sub_directory <- sprintf(paste0(project_dir,"/%s"),p44_result_version)
+    sub_directory <- sprintf(paste0(project_dir,"/%s/"),p44_result_version)
     ## str(p44_result_version)
     ## str(sub_directory)
 
@@ -36,9 +36,9 @@ networks <- googleCloudStorageR::gcs_list_objects(bucket = "pathos-research-resu
     ## str(networks)
 
 networks <- networks |>
-  dplyr::mutate(network = stringr::str_split_i(name,
+  dplyr::mutate(network = stringr::str_split_i(unlist(str_split_i(name,sub_directory,2)),
                                                "\\/",
-                                               3)) |>
+                                               1)) |>
   dplyr::select(network) |>
   dplyr::distinct()
 
@@ -112,6 +112,19 @@ parse_txt <- function(object) {
 
 }
 
+
+    parse_tsv <- function(object) {
+
+  data <- httr::content(object,
+                        as = "raw")
+
+  data <- readr::read_tsv(data,
+                          col_names = TRUE,
+                          show_col_types = FALSE)
+  return(data)
+
+}
+
 # add column to store whether or not gene of interest is in BN
 
 networks$gene_in_BN <- NA
@@ -130,7 +143,7 @@ for (index in c(1:nrow(networks))) {
 
     # load edges
 
-    bn_edges <- pathosr::load_bn_data(sprintf(paste0(project_dir,"/%s/%s/tables/BayesianNetwork"),
+    bn_edges <- pathosr::load_bn_data(sprintf(paste0(project_dir,"/%s/%s/BayesianNetwork"),
                                               p44_result_version,
                                               networks$network[index]))
 
@@ -151,11 +164,13 @@ for (index in c(1:nrow(networks))) {
                     networks$network[index]))
 
       # load module gene membership for KDA
-
+        final_dir <- sprintf(paste0(project_dir,"/%s/%s/"), p44_result_version,networks$network[index])
+        soft_power <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"QC/")) %>% dplyr::filter(grepl("Estimated_soft_power", name))
+        soft_power <- unlist(strsplit(gcs_get_object(bucket="pathos-research-results",soft_power$name),": |\n"))[2]
+        soft_power_dir <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"WGCNA/WGCNA_beta_",soft_power))
+        KD_input <- dplyr::filter(soft_power_dir, grepl("InputFile.txt",name))$name
       module_gene <- googleCloudStorageR::gcs_get_object(bucket = "pathos-research-results",
-                                                         object = sprintf("project_0044/%s/%s/tables/KDA/KDAInputFile.txt",
-                                                                          p44_result_version,
-                                                                          networks$network[index]),
+                                                         object = KD_input,
                                                          parseFunction = parse_txt)
 
       # format module gene membership for KDA
@@ -164,7 +179,7 @@ for (index in c(1:nrow(networks))) {
                                      f = module_gene$target)
 
  ## run KDA
-if(!file.exists(paste0(directory,"_results_kda.csv"))){
+if(!file.exists(paste0(gsub("/","_",directory),"_results_kda.csv"))){
       results_kda_temp <- pathosr::calc_key_drivers(network = as.matrix(bn_edges),
                                                     signatures = module_gene_formatted)
 
@@ -175,7 +190,7 @@ if(!file.exists(paste0(directory,"_results_kda.csv"))){
                                         dplyr::mutate(network = networks$network[index]))
 
 } else{ print("Reading in existing KDA file")
-    results_kda <- read.csv(paste0(directory,"_results_kda.csv"))}
+    results_kda <- read.csv(paste0(gsub("/","_",directory),"_results_kda.csv"))}
 
     # otherwise
 
@@ -194,9 +209,9 @@ if(!file.exists(paste0(directory,"_results_kda.csv"))){
 
 
 # save KDA results
-if(to_file==TRUE & !file.exists(paste0(directory,"_results_kda.csv"))){
+if(to_file==TRUE & !file.exists(paste0(gsub("/","_",directory),"_results_kda.csv"))){
 write.csv(x = results_kda,
-          file = paste0(directory,"_results_kda.csv"),
+          file = paste0(gsub("/","_",directory),"_results_kda.csv"),
           row.names = FALSE)
 } else { output_list[["KDA"]] <- results_kda}
 
@@ -214,35 +229,41 @@ module_os_summary_all <- data.frame()
 
 for (index in c(1:nrow(networks))) {
 
-        data_wgcn <- pathosr::load_wgcn_data(sprintf("project_0044/%s/%s",
-                                                 p44_result_version,
-                                                 networks$network[index]),
-                                         list("os_signatures",
-                                              "wgcna_gene_info"))
+    final_dir <- sprintf(paste0(project_dir,"/%s/%s/"), p44_result_version,networks$network[index])
+        soft_power <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"QC/")) %>% dplyr::filter(grepl("Estimated_soft_power", name))
+        soft_power <- unlist(strsplit(gcs_get_object(bucket="pathos-research-results",soft_power$name),": |\n"))[2]
+    soft_power_dir <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"WGCNA/WGCNA_beta_",soft_power))
+    gene_info <- dplyr::filter(soft_power_dir, grepl("_gene_info",name))$name
+    module_gene_info <- googleCloudStorageR::gcs_get_object(bucket = "pathos-research-results",object = gene_info,parseFunction = parse_tsv)
 
-##      str(data_wgcn)
+
+    data_wgcn <- pathosr::load_wgcn_data(final_dir, list("os_signatures"))
+    data_wgcn$wgcna_gene_info <- module_gene_info
+
+
+     ## str(data_wgcn)
       if(!any(is.null(c(data_wgcn[c("os_signatures","wgcna_gene_info")])))){
     # format the OS signatures
 
     gene_info <- data_wgcn$os_signatures |>
-      dplyr::mutate(effect = dplyr::case_when(estimate > 1 & adj.p < 0.05 ~ "worse_OS",
-                                              estimate < 1 & adj.p < 0.05 ~ "better_OS",
+      dplyr::mutate(effect = dplyr::case_when(HR > 1 & pvalue_adjusted < 0.05 ~ "worse_OS",
+                                              HR < 1 & pvalue_adjusted < 0.05 ~ "better_OS",
                                               TRUE ~ "no_effect")) |>
       dplyr::select(ensembl_gene_id,
                     effect)
 
 
           ### Summarize modules
-          module_os_summary <- left_join(dplyr::select(data_wgcn$os_signatures, Gene=ensembl_gene_id, hgnc_symbol,estimate),
-                                         dplyr::select(data_wgcn$wgcna_gene_info, Gene=ensembl_gene_id,module_color,module_label),by="Gene") %>% group_by(module_color) %>% summarize_all(mean) %>% dplyr::select(module=module_color,Mean_Estimate=estimate) %>% dplyr::mutate(Mean_Effect = dplyr::case_when(Mean_Estimate > 1 ~ "worse_OS",
+          module_os_summary <- left_join(dplyr::select(data_wgcn$os_signatures, Gene=ensembl_gene_id, hgnc_symbol,HR),
+                                         dplyr::select(data_wgcn$wgcna_gene_info, Gene=ensembl_gene_id,module_color,module_label),by="Gene") %>% group_by(module_color) %>% summarize_all(mean) %>% dplyr::select(module=module_color,Mean_Estimate=HR) %>% dplyr::mutate(Mean_Effect = dplyr::case_when(Mean_Estimate > 1 ~ "worse_OS",
                                               Mean_Estimate < 1 ~ "better_OS",
                                               TRUE ~ "no_effect"))
 
           module_os_summary$network <- networks[index,"network"]
           module_os_summary_all <- rbind(module_os_summary_all,module_os_summary)
-          ##str(module_os_summary)
+          ## str(module_os_summary)
 if(to_file==TRUE){
-          write.csv(module_os_summary_all,paste0(gene,"_",directory,"_module_os_summary.csv"),row.names=F)} else{ output_list[["OS_Summary"]] <- module_os_summary}
+          write.csv(module_os_summary_all,paste0(gene,"_",gsub("/","_",directory),"_module_os_summary.csv"),row.names=F)} else{ output_list[["OS_Summary"]] <- module_os_summary}
 
 
 
@@ -251,36 +272,47 @@ if(to_file==TRUE){
   if (!is.na(networks$gene_in_BN[index]) & networks$gene_in_BN[index]) {
 
     # load WGCN data
+    final_dir <- sprintf(paste0(project_dir,"/%s/%s/"), p44_result_version,networks$network[index])
+        soft_power <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"QC/")) %>% dplyr::filter(grepl("Estimated_soft_power", name))
+        soft_power <- unlist(strsplit(gcs_get_object(bucket="pathos-research-results",soft_power$name),": |\n"))[2]
+    soft_power_dir <- gcs_list_objects(bucket="pathos-research-results",prefix=paste0(final_dir,"WGCNA/WGCNA_beta_",soft_power))
+      gene_info <- dplyr::filter(soft_power_dir, grepl("_gene_info",name))$name
+      ## str(gene_info)
+    module_gene_info <- googleCloudStorageR::gcs_get_object(bucket = "pathos-research-results",object = gene_info,parseFunction = parse_tsv)
 
-    data_wgcn <- pathosr::load_wgcn_data(sprintf("project_0044/%s/%s",
-                                                 p44_result_version,
-                                                 networks$network[index]),
-                                         list("os_signatures",
-                                              "wgcna_gene_info"))
 
+    data_wgcn <- pathosr::load_wgcn_data(final_dir, list("os_signatures"))
+    data_wgcn$wgcna_gene_info <- module_gene_info
+
+      
 ##      str(data_wgcn)
       if(!any(is.null(c(data_wgcn[c("os_signatures","wgcna_gene_info")])))){
     # format the OS signatures
 
     gene_info <- data_wgcn$os_signatures |>
-      dplyr::mutate(effect = dplyr::case_when(estimate > 1 & adj.p < 0.05 ~ "worse_OS",
-                                              estimate < 1 & adj.p < 0.05 ~ "better_OS",
+      dplyr::mutate(effect = dplyr::case_when(HR > 1 & pvalue_adjusted < 0.05 ~ "worse_OS",
+                                              HR < 1 & pvalue_adjusted < 0.05 ~ "better_OS",
                                               TRUE ~ "no_effect")) |>
       dplyr::select(ensembl_gene_id,
                     effect)
+          ## str(gene_info)
 
+          print("Prepping OS")
 
-          ### Summarize modules
-          module_os_summary <- left_join(dplyr::select(data_wgcn$os_signatures, Gene=ensembl_gene_id, hgnc_symbol,estimate),
-                                         dplyr::select(data_wgcn$wgcna_gene_info, Gene=ensembl_gene_id,module_color,module_label),by="Gene") %>% group_by(module_color) %>% summarize_all(mean) %>% dplyr::select(module=module_color,Mean_Estimate=estimate) %>% dplyr::mutate(Mean_Effect = dplyr::case_when(Mean_Estimate > 1 ~ "worse_OS",
+### Summarize modules
+          ## str(data_wgcn$os_signatures)
+          ## str(as.data.frame(data_wgcn$wgcna_gene_info))
+          module_os_summary <- left_join(dplyr::select(data_wgcn$os_signatures, Gene=ensembl_gene_id, hgnc_symbol,HR),
+                                         dplyr::select(data_wgcn$wgcna_gene_info, Gene=ensembl_gene_id,module_color,module_label),by="Gene") %>% group_by(module_color) %>% summarize_all(mean) %>% dplyr::select(module=module_color,Mean_Estimate=HR) %>% dplyr::mutate(Mean_Effect = dplyr::case_when(Mean_Estimate > 1 ~ "worse_OS",
                                               Mean_Estimate < 1 ~ "better_OS",
                                               TRUE ~ "no_effect"))
 
           module_os_summary$network <- networks[index,"network"]
           module_os_summary_all <- rbind(module_os_summary_all,module_os_summary)
-          ##str(module_os_summary)
-if(to_file==TRUE & !file.exists(paste0(gene,"_",directory,"_module_os_summary.csv"))){
-          write.csv(module_os_summary_all,paste0(gene,"_",directory,"_module_os_summary.csv"),row.names=F)} else{ output_list[["OS_Summary"]] <- module_os_summary}
+          ## str(module_os_summary)
+          print("Finished OS")
+if(to_file==TRUE & !file.exists(paste0(gene,"_",gsub("/","_",directory),"_module_os_summary.csv"))){
+          write.csv(module_os_summary_all,paste0(gene,"_",gsub("/","_",directory),"_module_os_summary.csv"),row.names=F)} else{ output_list[["OS_Summary"]] <- module_os_summary}
     # for each module
 
     list_modules <- unique(data_wgcn$wgcna_gene_info$module_color)
@@ -347,7 +379,7 @@ results_os <- results_os |>
 # save OS results
 if(to_file==TRUE){
 write.csv(x = results_os,
-          file = paste0(gene,"_",directory,"_results_os.csv"),
+          file = paste0(gene,"_",gsub("/","_",directory),"_results_os.csv"),
           row.names = FALSE)
 } else{ output_list[["OS"]] <- results_os}
 #### format results for BD ####
@@ -405,7 +437,7 @@ results_bd <- networks |>
 # save results
 if(to_file==TRUE){
 write.csv(x = results_bd,
-          file = paste0(gene,"_",directory,"_results_bd.csv"),
+          file = paste0(gene,"_",gsub("/","_",directory),"_results_bd.csv"),
           row.names = FALSE)
 } else{ output_list[["BD"]] <- results_bd}
 }}}

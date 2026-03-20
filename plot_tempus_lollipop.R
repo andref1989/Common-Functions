@@ -179,6 +179,7 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
 ##    mutations$Mut_Class <- ifelse(mutations$AA1==mutations$AA2, "Silent", mutations$Mut_Class)
 
         write.table(mutations,"mutations.txt", quote=F, sep='\t', row.names=F)
+
         mutation_dat <- readMAF("mutations.txt", gene.symbol.col = "Gene", variant.class.col = "Mut_Class", protein.change.col = "AA_change",sep='\t')
         return(mutation_dat)
     }
@@ -220,6 +221,6 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
         htmlwidgets::saveWidget(mutation_fig,output_html)} else {
                                                              htmlwidgets::saveWidget(mutation_fig,paste0(target_gene,"_mutations.html"))}
 
-    if(return_df){return(mutations)}
+    if(return_df){return(mmf_int)}
     }
 
