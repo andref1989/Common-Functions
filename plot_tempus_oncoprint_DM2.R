@@ -77,12 +77,12 @@ plot_tempus_oncoprint <- function(data_cohort,
 
       if(dm1_file_exists){
 
-        input_td <- load_tempus_data(data_cohort,
+        input_td <- tempusr::load_tempus_data(data_cohort,
                                      collection = NULL,
                                      list_files = list_files_dm1)
       } else if(dm2_file_exists){
 
-        input_td <- load_tempus_data(data_cohort,
+        input_td <- tempusr::load_tempus_data(data_cohort,
                                      collection = NULL,
                                      list_files = list_files_dm2)
       } else {
@@ -110,16 +110,16 @@ plot_tempus_oncoprint <- function(data_cohort,
         mmf <- input_td[grep("molecular_master_file", names(input_td))]
         gene_identifier <- unique(unlist(lapply(mmf, function(x) intersect(gene_identifier,colnames(x)))))
 
-        if(is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) > 50){
-            stop("There are more than 50 unique genes in this mmf file, did you forget to set any genes of interest?")
-            } else if (is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) < 50){
+        if(is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) > 100){
+            stop("There are more than 100 unique genes in this mmf file, did you forget to set any genes of interest?")
+            } else if (is.null(genes_of_interest) && length(unique(mmf[[1]][,gene_identifier])) < 100){
                       common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
                       mmf <- do.call("rbind", lapply(mmf, function(x) x[,common_cols]))
-                      mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) && length(genes_of_interest) <50){
+                      mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest) && length(genes_of_interest) <100){
 
                                                    common_cols <- Reduce("intersect",lapply(mmf, function(x) colnames(x)))
                       mmf <- do.call("rbind", lapply(mmf, function(x) x[which(x[,gene_identifier] %in% genes_of_interest),common_cols]))
-                                                   mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest && length(genes_of_interest) > 50)) { stop("There are more than 50 specified genes of interest. Consider reducing that number and replotting")
+                                                   mmf <- as.data.frame(mmf)} else if (!is.null(genes_of_interest && length(genes_of_interest) > 100)) { stop("There are more than 100 specified genes of interest. Consider reducing that number and replotting")
 }
 
 
@@ -204,14 +204,14 @@ plot_tempus_oncoprint <- function(data_cohort,
         mmf_CNV <- mmf[grep("cnv_gene", names(mmf))]
 
         if(is.null(genes_of_interest) &&
-           (length(unique(mmf_SNV[[1]][,gene_identifier])) > 50 ||
-            length(unique(mmf_CNV[[1]][,gene_identifier])) > 50)){
+           (length(unique(mmf_SNV[[1]][,gene_identifier])) > 100 ||
+            length(unique(mmf_CNV[[1]][,gene_identifier])) > 100)){
 
-            stop("There are more than 50 unique genes in this mmf file, did you forget to set any genes of interest?")
+            stop("There are more than 100 unique genes in this mmf file, did you forget to set any genes of interest?")
 
           } else if (is.null(genes_of_interest) &&
-                     (length(unique(mmf[[1]][,gene_identifier])) < 50 &&
-                      length(unique(mmf_CNV[[1]][,gene_identifier])) < 50)){
+                     (length(unique(mmf[[1]][,gene_identifier])) < 100 &&
+                      length(unique(mmf_CNV[[1]][,gene_identifier])) < 100)){
 
             common_cols1 <- Reduce("intersect",lapply(mmf_SNV, function(x) colnames(x)))
             common_cols2 <- Reduce("intersect",lapply(mmf_CNV, function(x) colnames(x)))
@@ -220,7 +220,7 @@ plot_tempus_oncoprint <- function(data_cohort,
             mmf_SNV <- as.data.frame(mmf_SNV)
             mmf_CNV <- as.data.frame(mmf_CNV)
 
-            } else if (!is.null(genes_of_interest) && length(genes_of_interest) <50){
+            } else if (!is.null(genes_of_interest) && length(genes_of_interest) <100){
 
               common_cols1 <- Reduce("intersect",lapply(mmf_SNV, function(x) colnames(x)))
               common_cols2 <- Reduce("intersect",lapply(mmf_CNV, function(x) colnames(x)))
@@ -232,10 +232,10 @@ plot_tempus_oncoprint <- function(data_cohort,
               mmf_SNV <- dplyr::filter(mmf_SNV, !!as.name(gene_identifier) %in% genes_of_interest)
               mmf_CNV <- dplyr::filter(mmf_CNV, !!as.name(gene_identifier) %in% genes_of_interest)
 
-            } else if (!is.null(genes_of_interest &&
-                                length(genes_of_interest) > 50)) {
+            } else if (!is.null(genes_of_interest) &&
+                                length(genes_of_interest) > 100) {
 
-              stop("There are more than 50 specified genes of interest. Consider reducing that number and replotting")
+              stop("There are more than 100 specified genes of interest. Consider reducing that number and replotting")
 
               }
 
