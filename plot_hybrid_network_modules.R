@@ -22,7 +22,7 @@
 #' @param out_edge_col Color of edges leaving your gene/module(s) of interest (Character) Default: Red
 #' @param in_edge_col Color of edges entering your gene/module(s) of interest (Character) Default: Green
 #' @param gene_annotation Data frame containing a minimum of ensembl_gene_id and hgnc_symbol
-#'
+#' @param edge_curvature How curvy/straight you want your edges to be
 #'
 #' @return Plot of your network!
 #' @note Ordinary connections between modules are colored black with a linewidth
@@ -65,6 +65,7 @@ plot_hybrid_network_modules <- function(hybrid_net,
                                         net_layout = "seham",
                                         out_edge_col = "red",
                                         in_edge_col = "green",
+                                        edge_curvature=0.1,
                                         gene_annotation) {
 
 
@@ -288,7 +289,7 @@ insertLayer <- function(plotObj, after=1, ...) {
 
 
   p <- ggplot2::ggplot(net_out, aes(x = .data$x, y = .data$y, xend = .data$xend, yend = .data$yend)) +
-    ggnetwork::geom_edges(data = black, aes( lwd = .data$Edge_Count), color = "black", curvature = 0.1, angle = 10, arrow = arrow(length = unit(4, "pt"), type = "closed", angle = 35),alpha=0.6) +
+    ggnetwork::geom_edges(data = black, aes( lwd = .data$Edge_Count), color = "black", curvature =edge_curvature, angle = 10, arrow = arrow(length = unit(4, "pt"), type = "closed", angle = 35),alpha=0.6) +
     theme_void() +
     scale_linewidth_binned(range = c(0.001, 3), n.breaks = 6) +
     scale_size_area("Module_Node_Count", n.breaks = 8, max_size = 20) +

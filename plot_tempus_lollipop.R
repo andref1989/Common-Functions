@@ -74,17 +74,17 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
     prep_lollipop_dm1 <- function(input_td){
 
         tempus_mmf <- input_td[["g_molecular_master_file"]]
-        if(filter_germline){ tempus_mmf <- dplyr::filter(somatic_germline !="G")}
+        if(filter_germline){ tempus_mmf <- dplyr::filter(.data$somatic_germline !="G")}
     if(!is.null(variant_type_blacklist)){
-        tempus_mmf <- dplyr::filter(tempus_mmf, !functional_impact %in% variant_type_blacklist)
+        tempus_mmf <- dplyr::filter(tempus_mmf, !.data$functional_impact %in% variant_type_blacklist)
         if(nrow(tempus_mmf) <1){ print("Not enough mutations available after removing blacklisted types"); stop()}
 }
 
     if(!is.null(assay_blacklist)){
-        mutations <-  dplyr::filter(tempus_mmf, !assay %in% assay_blacklist,
-                                    gene_canonical_name==target_gene,variant_type=="Short Variant")
+        mutations <-  dplyr::filter(tempus_mmf, !.data$assay %in% assay_blacklist,
+                                    .data$gene_canonical_name==target_gene,.data$variant_type=="Short Variant")
     } else { mutations <-  dplyr::filter(tempus_mmf,
-                                         gene_canonical_name==target_gene,variant_type=="Short Variant")
+                                         .data$gene_canonical_name==target_gene,.data$variant_type=="Short Variant")
                                          }
     if(nrow(mutations) <1){ print(paste0("Not enough mutations available after removing ",paste0(assay_blacklist,collapse=","), "assays")); stop()}
 
@@ -136,13 +136,13 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
 
         mutations <- mutations[order(mutations$AA_Pos),]
 
+        mutations$Mut_Class <- dplyr::case_when(mutations$mutation_effect=="synonymous_variant"~ "Silent",mutations$mutation_effect=="missense_variant"~"Missense_Mutation",grepl("splice", mutations$mutation_effect)~"Splice_Region",grepl("stop_gained", mutations$mutation_effect)~"Nonsense_Mutation",grepl("\\*",mutations$p_var) ~"Nonsense_Mutation",.default="Unknown")
 
-        mutations$Mut_Class <- ifelse(mutations$mutation_effect=="synonymous_variant", "Silent",ifelse(mutations$mutation_effect=="missense_variant","Missense_Mutation","Unknown"))
         mutations$Gene <- mutations$gene_canonical_name
 ##    mutations$Mut_Class <- ifelse(mutations$AA1==mutations$AA2, "Silent", mutations$Mut_Class)
 
         write.table(mutations,"mutations.txt", quote=F, sep='\t', row.names=F)
-        mutation_dat <- readMAF("mutations.txt", gene.symbol.col = "Gene", variant.class.col = "Mut_Class", protein.change.col = "AA_change",sep='\t')
+        mutation_dat <- g3viz::readMAF("mutations.txt", gene.symbol.col = "Gene", variant.class.col = "Mut_Class", protein.change.col = "AA_change",sep='\t')
         return(mutation_data)
     }
 ##### DM2 Function ####
@@ -151,21 +151,21 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
 
         tempus_mmf <- input_td[["onco_result_snv_indel_passing"]] %>% dplyr::filter(!grepl("UTR|intron", variant_molecular_consequence))
         if(nrow(tempus_mmf) <1){ stop("No coding mutations detected")}
-        if(filter_germline){ tempus_mmf <- dplyr::filter(tempus_mmf, variant_origin !="germline") }
+        if(filter_germline){ tempus_mmf <- dplyr::filter(tempus_mmf, .data$variant_origin !="germline") }
 
         if(!is.null(variant_type_blacklist)){
 
-        tempus_mmf <- dplyr::filter(tempus_mmf, !variant_classification %in% variant_type_blacklist)
+        tempus_mmf <- dplyr::filter(tempus_mmf, !.data$variant_classification %in% variant_type_blacklist)
         if(nrow(tempus_mmf) <1){ stop("Not enough mutations available after removing blacklisted types")}
         }
 
     if(!is.null(assay_blacklist)){
-        mutations <-  dplyr::filter(tempus_mmf, !assay %in% assay_blacklist,
-                                    gene_symbol==target_gene,variant_type_detailed %in% c("snv","mnp"))
+        mutations <-  dplyr::filter(tempus_mmf, !.data$assay %in% assay_blacklist,
+                                    .data$gene_symbol==target_gene,.data$variant_type_detailed %in% c("snv","mnp"))
 
     } else { mutations <-  dplyr::filter(tempus_mmf,
-                                         gene_symbol==target_gene,
-                                         variant_type_detailed %in% c("snv","mnp"))}
+                                         .data$gene_symbol==target_gene,
+                                         .data$variant_type_detailed %in% c("snv","mnp"))}
  
     if(nrow(mutations) <1){ stop(paste0("Not enough mutations available after removing ",paste0(assay_blacklist,collapse=","), "assays"))}
 
@@ -175,12 +175,15 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
         mutations <- mutations[order(mutations$AA_Pos),]
         mutations$Gene <- mutations$gene_symbol
 
-    mutations$Mut_Class <- ifelse(mutations$variant_molecular_consequence=="synonymous_variant", "Silent",ifelse(mutations$variant_molecular_consequence=="missense_variant","Missense_Mutation",ifelse(grepl("splice", mutations$variant_molecular_consequence),"Splice","Unknown")))
-##    mutations$Mut_Class <- ifelse(mutations$AA1==mutations$AA2, "Silent", mutations$Mut_Class)
+        mutations$Mut_Class <- dplyr::case_when(mutations$variant_molecular_consequence=="synonymous_variant"~ "Silent",mutations$variant_molecular_consequence=="missense_variant"~"Missense_Mutation",grepl("splice", mutations$variant_molecular_consequence)~"Splice_Region",grepl("stop_gained", mutations$variant_molecular_consequence)~"Nonsense_Mutation",grepl("\\*",mutations$p_var) ~"Nonsense_Mutation",.default="Unknown")
+        ##,
+        ##    mutations$Mut_Class <- ifelse(mutations$AA1==mutations$AA2, "Silent", mutations$Mut_Class)
+
 
         write.table(mutations,"mutations.txt", quote=F, sep='\t', row.names=F)
 
-        mutation_dat <- readMAF("mutations.txt", gene.symbol.col = "Gene", variant.class.col = "Mut_Class", protein.change.col = "AA_change",sep='\t')
+        mutation_dat <- g3viz::readMAF("mutations.txt", gene.symbol.col = "Gene", variant.class.col = "Mut_Class", protein.change.col = "AA_change",sep='\t')
+
         return(mutation_dat)
     }
 
@@ -214,9 +217,9 @@ plot_tempus_lollipop <- function(data_cohort,target_gene,output_html=NULL,title=
 ######## Finalize plotting ###############
 
 
-    plot_options <- g3Lollipop.options()
+    plot_options <- g3viz::g3Lollipop.options()
     if(!is.null(title)){ plot_options$titleText <- title} else{ plot_options$titleText <- paste0(target_gene, " mutation locations")}
-    mutation_fig <- g3Lollipop(mmf_int,gene.symbol=target_gene,output.filename=title,gene.symbol.col="Gene", protein.change.col = "AA_change",btn.style="blue",plot.options=plot_options)
+    mutation_fig <- g3viz::g3Lollipop(mmf_int,gene.symbol=target_gene,output.filename=title,gene.symbol.col="Gene", protein.change.col = "AA_change",btn.style="blue",plot.options=plot_options)
     if(!is.null(output_html)){
         htmlwidgets::saveWidget(mutation_fig,output_html)} else {
                                                              htmlwidgets::saveWidget(mutation_fig,paste0(target_gene,"_mutations.html"))}
